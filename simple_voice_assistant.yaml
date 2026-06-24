@@ -1,7 +1,7 @@
 substitutions:
   name: "esphome-web-f407a0"
   friendly_name: "Smart Speaker 2"
-  version: "0.1.1"
+  version: "0.1.2"
   
   # Pin-Belegung
   # Amp Max98357
@@ -47,18 +47,12 @@ esphome:
     board_build.flash_mode: dio
     build_flags: "-DBOARD_HAS_PSRAM"
   on_boot: 
-    priority: -100
+    priority: 200
     then:
       - logger.log: "esphome on_boot"
       # Boot-Modus aktivieren (niedrigste Priorität = -1)
-      - lambda: |-
-          float vol = id(volume_number).state / 100.0f;
-          ESP_LOGI("boot", "Restored HA volume_number: %.1f", vol); 
-          id(hw_speaker)->set_volume(vol);
-          ESP_LOGI("boot", "Setting speaker volume to %.2f", vol);
-
       - script.execute:
-          id: set_mode
+          id: set_content_mode
           mode: -1
 
 esp32:
@@ -74,6 +68,7 @@ psram:
   speed: 80MHz
 
 wifi:
+  id: wifi_id
   ssid: !secret wifi_ssid
   password: !secret wifi_password
   on_connect: 
@@ -84,11 +79,18 @@ wifi:
       - logger.log: "wifi on_disconnect"
 
 api:
+  id: api_id
   encryption:
     key: !secret api_encryption_key
   on_client_connected: 
     then:
       - logger.log: "api on_client_connect"
+      - lambda: |-
+          float vol = id(volume_number).state / 100.0f;
+          ESP_LOGI("boot", "Restored HA volume_number: %.1f", vol); 
+          id(hw_speaker)->set_volume(vol);
+          ESP_LOGI("boot", "Setting speaker volume to %.2f", vol);
+
   on_client_disconnected: 
     then:
       - logger.log: "api on_client_disconnect"
@@ -109,7 +111,7 @@ time:
         - delay: 222ms
         # Zeit ist da → Boot verlassen → Idle (0)
         - script.execute:
-            id: set_mode
+            id: set_content_mode
             mode: 0
 
 ###################################################################################
@@ -179,18 +181,19 @@ light:
           update_interval: 2s
       # Effect Mode -1 - Booting
       - addressable_lambda:
-          name: "Effect Mode -1"
+          name: "Effect Content -1"
           update_interval: 50ms
           lambda: |-
-            int value = 16 + (millis() / 200);
+            int value = 16 + (millis() / 40);
             if (value > 255) value = 255;
 
             for (int i = 0; i < it.size(); i++) {
               it[i] = Color(0, 0, value);
             }
+      # Content Mode Effects
       # Effect Mode 0 - Idle
       - addressable_lambda:
-          name: "Effect Mode 0"
+          name: "Effect Content 0"
           update_interval: 30ms
           lambda: |-
             for (int i = 0; i < it.size(); i++) {
@@ -198,7 +201,7 @@ light:
             }
       # Effect Mode 1 - Listening
       - addressable_lambda:
-          name: "Effect Mode 1"
+          name: "Effect Content 1"
           update_interval: 20ms
           lambda: |-
             const int count = ${led_count};
@@ -217,7 +220,7 @@ light:
             }
       # Effect Mode 2 - Thinking
       - addressable_lambda:
-          name: "Effect Mode 2"
+          name: "Effect Content 2"
           update_interval: 20ms
           lambda: |-
             int pos = (millis() / 40) % it.size();
@@ -228,16 +231,17 @@ light:
             }
       # Effect Mode 3 - Speaking
       - addressable_lambda:
-          name: "Effect Mode 3"
+          name: "Effect Content 3"
           update_interval: 30ms
           lambda: |-
             for (int i = 0; i < it.size(); i++) {
               float h = (sin((millis() / 150.0f) + i * 0.5f) + 1) / 2;  // 0–1
               it[i] = Color(int(255 * h), int(180 * h), 0);
             }
-      # Effect Mode 4 - Volume Overlay
+      # Overlay Mode Effects
+      # Effect Mode 1 - Volume Overlay
       - addressable_lambda:
-          name: "Effect Mode 4"
+          name: "Effect Overlay 1"
           update_interval: 20ms
           lambda: |-
             float vol = id(hw_speaker)->get_volume();
@@ -270,9 +274,9 @@ light:
                 (uint8_t)(255 * fade)
               );
             }
-      # Effect Mode 5 - Error Overlay
+      # Effect Mode 2 - Error Overlay
       - addressable_lambda:
-          name: "Effect Mode 5"
+          name: "Effect Overlay 2"
           update_interval: 40ms
           lambda: |-
             float t = (millis() % 800) / 800.0f;
@@ -290,6 +294,9 @@ i2c:
 
 # Climate BME280
 sensor:
+  - platform: wifi_signal    
+    id: wifi_rssi    
+    update_interval: 30s
   - platform: bme280_i2c
     address: ${bme_addr}
     temperature:
@@ -302,6 +309,7 @@ sensor:
       id: room_press
       name: "Luftdruck"
     update_interval: 30s
+
 
 # Buttons TTP223
 binary_sensor:
@@ -344,12 +352,32 @@ image:
     type: binary
     resize: 44x44
     invert_alpha: False
-  - file: "mdi:wifi"
-    id: icon_wifi
+  # - file: "mdi:wifi"
+  #   id: icon_wifi
+  #   type: binary
+  #   resize: 16x16
+  - file: "mdi:wifi-strength-1"
+    id: icon_wifi_1
+    type: binary
+    resize: 16x16
+  - file: "mdi:wifi-strength-2"
+    id: icon_wifi_2
+    type: binary
+    resize: 16x16
+  - file: "mdi:wifi-strength-3"
+    id: icon_wifi_3
+    type: binary
+    resize: 16x16
+  - file: "mdi:wifi-strength-4"
+    id: icon_wifi_4
     type: binary
     resize: 16x16
   - file: "mdi:home-assistant"
     id: icon_api
+    type: binary
+    resize: 16x16
+  - file: "mdi:assistant"
+    id: icon_va
     type: binary
     resize: 16x16
   - file: "mdi:microphone-off"
@@ -399,7 +427,6 @@ font:
     id: font_huge
     size: 28
 
-
 # Display ssd1306
 display:
   - platform: ssd1306_i2c
@@ -412,14 +439,28 @@ display:
       // -------------------------------------------------------
 
       // Icons rechts (jeweils 16x16)
-      if (wifi::global_wifi_component->is_connected())
-        it.image(112, 0, id(icon_wifi));
-      if (api::global_api_server->is_connected())
+      // WiFi Signalstärke
+      if (id(wifi_id).is_connected()) {
+          //it.image(112, 0, id(icon_wifi));
+          float strength = id(wifi_rssi).state;
+
+          if (strength > -55)
+              it.image(112, 0, id(icon_wifi_4));
+          else if (strength > -65)
+              it.image(112, 0, id(icon_wifi_3));
+          else if (strength > -75)
+              it.image(112, 0, id(icon_wifi_2));
+          else
+              it.image(112, 0, id(icon_wifi_1));
+      }
+      if (id(api_id).is_connected())
         it.image(96, 0, id(icon_api));
+      if (id(va).get_api_connection() != nullptr)
+        it.image(80, 0, id(icon_api));
       if (id(hw_speaker)->get_mute_state())
-        it.image(80, 0, id(icon_mute));
+        it.image(64, 0, id(icon_mute));
       if (id(hw_microphone)->get_mute_state())
-        it.image(64, 0, id(icon_deaf));
+        it.image(48, 0, id(icon_deaf));
 
       // -------------------------------------------------------
       // 1b. BLAUER CONTENT-BEREICH (Pixel 16–63)
@@ -621,7 +662,7 @@ voice_assistant:
       channels: 1  
   speaker: hw_speaker
 
-  auto_gain: 31dBFS
+  auto_gain: 15dBFS
   noise_suppression_level: 2
   volume_multiplier: 4.0
 
@@ -640,7 +681,7 @@ voice_assistant:
     - logger.log: "voice_assistant on_Listening"
     # VA hört zu → Listening (1)
     - script.execute:
-        id: set_mode
+        id: set_content_mode
         mode: 1
 
   on_start: 
@@ -656,7 +697,7 @@ voice_assistant:
         args: [id(text_message).c_str()]
     # Spracheingabe beendet → Thinking (2)
     - script.execute:
-        id: set_mode
+        id: set_content_mode
         mode: 2
 
   on_stt_vad_start: 
@@ -676,14 +717,14 @@ voice_assistant:
     - logger.log: "voice_assistant on_tts_stream_start"
     # TTS spricht → Speaking (3)
     - script.execute:
-        id: set_mode
+        id: set_content_mode
         mode: 3
 
   on_tts_stream_end:
     - logger.log: "voice_assistant on_tts_stream_end"
     # TTS fertig → zurück zu Idle (0)
     - script.execute:
-        id: set_mode
+        id: set_content_mode
         mode: 0
     # Restart only mWW if enabled; streaming wake words automatically restart
     - micro_wake_word.start:
@@ -699,7 +740,7 @@ voice_assistant:
     - logger.log: "voice_assistant on_idle"
     # # nix zu tun → zurück zu Idle (0)
     # - script.execute:
-    #     id: set_mode
+    #     id: set_content_mode
     #     mode: 0
 
   on_end: 
@@ -711,7 +752,7 @@ voice_assistant:
         args: [code, message.c_str()]
     # Fehler → erst zurück zu Idle (0), dann zu Error(5), der geht dann zurück auf idle(0)
     - script.execute:
-        id: set_mode
+        id: set_content_mode
         mode: 0
     - script.execute:
         id: show_error_overlay
@@ -737,9 +778,6 @@ voice_assistant:
     - logger.log: "voice_assistant on_timer_tick"
   on_timer_updated: 
     - logger.log: "voice_assistant on_timer_updated"
-          
-              
-      
 
 micro_wake_word:
   on_wake_word_detected:
@@ -771,10 +809,13 @@ micro_wake_word:
 globals:
   - id: content_mode
     type: int
+    restore_value: False
     initial_value: "-1" # Boot
   - id: overlay_mode
     type: int
+    restore_value: False
     initial_value: "0" # kein overlay
+
   - id: error_message
     type: std::string
     initial_value: "\"\""
@@ -820,7 +861,7 @@ number:
     optimistic: true
     set_action:
       - lambda: |-
-          id(set_mode).execute(int(x));
+          id(set_content_mode).execute(int(x));
   - platform: template
     id: overlay_mode_number
     name: "Overlay Mode"
@@ -836,12 +877,12 @@ number:
 
 # Zentrale Stelle für Systemreaktionen
 script:
-  - id: set_mode
+  - id: set_content_mode
     parameters:
       mode: int # neuer content mode
     then:
       - logger.log:
-          format: "script set_mode %d"
+          format: "script set_content_mode %d"
           args: [mode]
       - lambda: |- 
           // Mode setzen
@@ -850,10 +891,12 @@ script:
           id(content_mode_number).publish_state(mode);
 
           // LED-Effekt auswählen (neue Namen)
-          std::string effect = "Effect Mode " + std::to_string(mode);
-          auto call = id(hw_leds).turn_on();
-          call.set_effect(effect.c_str());
-          call.perform();
+          std::string effect = "Effect Content " + std::to_string(mode);
+          // auto call = id(hw_leds).turn_on();
+          // call.set_effect(effect.c_str());
+          // call.perform();
+
+          id(hw_leds).turn_on().set_effect(effect).perform();
 
           // Display aktualisieren
           id(display_id).update();
