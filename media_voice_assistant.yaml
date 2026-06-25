@@ -46,6 +46,8 @@ esphome:
     board_build.arduino.memory_type: qio_opi
     board_build.flash_mode: dio
     build_flags: "-DBOARD_HAS_PSRAM"
+  includes: 
+    - content_mode_enum.h
   on_boot:
     priority: 200
     then:
@@ -53,7 +55,7 @@ esphome:
       # Boot-Modus aktivieren (niedrigste Priorität = -1)
       - script.execute:
           id: set_content_mode
-          mode: -1
+          mode: CONTENT_BOOT
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -105,7 +107,7 @@ time:
         # Zeit ist da → Boot verlassen → Idle (0)
         - script.execute:
             id: set_content_mode
-            mode: 0
+            mode: CONTENT_IDLE
 
 ###################################################################################
 # Hardware
@@ -389,13 +391,13 @@ binary_sensor:
     id: btn_left
     pin: ${btn_3_pin}
     on_click:
-      media_player.volume_up: hw_media_player
+      media_player.volume_down: hw_media_player
 
   - platform: gpio
     id: btn_right
     pin: ${btn_4_pin}
     on_click:
-      media_player.volume_down: hw_media_player
+      media_player.volume_up: hw_media_player
 
 # Icons - look in https://pictogrammers.com/library/mdi/
 image:
@@ -601,7 +603,7 @@ display:
         // -----------------------------------------
         // -1: Bootscreen
         // -----------------------------------------
-        case -1: {
+        case CONTENT_BOOT: {
           it.print(0, 0, id(font_medium), "BOOTING");
           it.image(42, 20, id(logo_esphome));
           it.printf(xc, y2, id(font_medium), TextAlign::CENTER,
@@ -613,7 +615,7 @@ display:
         // -------------------------
         // 0: IDLE
         // -------------------------
-        case 0: {
+        case CONTENT_IDLE: {
           it.print(0, 0, id(font_medium), "INFO");
           int page_duration = id(page_info_duration).state * 1000;
           int active_subpage = (esphome::millis() / page_duration) % 6;
@@ -697,7 +699,7 @@ display:
         // -------------------------
         // 1: LISTENING
         // -------------------------
-        case 1: {
+        case CONTENT_LISTENING: {
           it.print(0, 0, id(font_medium), "LISTEN");
           it.printf(xc+16, y1, id(font_medium), TextAlign::CENTER, "%s", id(text_message).c_str());
           it.image(0, 32, id(icon_listening));          
@@ -708,7 +710,7 @@ display:
         // -------------------------
         // 2: THINKING
         // -------------------------
-        case 2: {
+        case CONTENT_THINKING: {
           it.print(0, 0, id(font_medium), "THINKING");
           it.printf(xc+16, y1, id(font_medium), TextAlign::CENTER, "%s", id(text_message).c_str());
           it.image(0, 32, id(icon_thinking));          
@@ -719,7 +721,7 @@ display:
         // -------------------------
         // 3: SPEAKING (TTS)
         // -------------------------
-        case 3: {
+        case CONTENT_SPEAKING: {
           it.print(0, 0, id(font_medium), "SPEAKING");
           it.printf(xc+16, y1, id(font_medium), TextAlign::CENTER, "%s", id(text_message).c_str());
           it.image(0, 32, id(icon_speaking));          
@@ -733,7 +735,7 @@ display:
         // -------------------------
         // 4: MEDIA
         // -------------------------
-        case 4: {
+        case CONTENT_PLAYER: {
           it.print(0, 0, id(font_medium), "MEDIA");
           it.printf(xc+16, y1, id(font_medium), TextAlign::CENTER, "%s", id(text_message).c_str());
           it.image(0, 32, id(icon_speaking));
@@ -743,7 +745,7 @@ display:
         // -------------------------
         // 5: ANNOUNCING
         // -------------------------
-        case 5: {
+        case CONTENT_ANNOUNCING: {
           it.print(0, 0, id(font_medium), "ANNOUNCING");
           it.printf(xc+16, y1, id(font_medium), TextAlign::CENTER, "%s", id(text_message).c_str());
           it.image(0, 32, id(icon_speaking));
@@ -753,7 +755,7 @@ display:
         // -------------------------
         // 6: PLAYING
         // -------------------------
-        case 6: {
+        case CONTENT_PLAYING: {
           it.print(0, 0, id(font_medium), "PLAYING");
           it.printf(xc+16, y1, id(font_medium), TextAlign::CENTER, "%s", id(text_message).c_str());
           it.image(0, 32, id(icon_speaking));
@@ -763,7 +765,7 @@ display:
         // -------------------------
         // 7: PAUSING
         // -------------------------
-        case 7: {
+        case CONTENT_PAUSING: {
           it.print(0, 0, id(font_medium), "PAUSING");
           it.printf(xc+16, y1, id(font_medium), TextAlign::CENTER, "%s", id(text_message).c_str());
           it.image(0, 32, id(icon_speaking));
@@ -812,42 +814,42 @@ media_player:
       # VA antwortet → Announcing (5)
       - script.execute:
           id: set_content_mode
-          mode: 5 # MP Announcing
+          mode: CONTENT_ANNOUNCING
 
     on_play: 
       - logger.log: "media_player on_play"
       # MP spielt Media → Playing (6)
       - script.execute:
           id: set_content_mode
-          mode: 6 # MP Playing
+          mode: CONTENT_PLAYING
 
     on_pause: 
       - logger.log: "media_player on_pause"
       # MP pausiert Media → Playing (7)
       - script.execute:
           id: set_content_mode
-          mode: 7 # MP Plausing
+          mode: CONTENT_PAUSING
 
     on_idle: 
       - logger.log: "media_player on_idle"
       # MP hat keine Media → Ideling (4)
       - script.execute:
           id: set_content_mode
-          mode: 0 # MP Ideling
-
-    on_turn_off: 
-      - logger.log: "media_player on_turn_off"
-      # MP aus → Idle (0)
-      - script.execute:
-          id: set_content_mode
-          mode: 0 # idle
+          mode: CONTENT_IDLE
 
     on_turn_on: 
       - logger.log: "media_player on_turn_on"
       # MP an → Ideling (4)
       - script.execute:
           id: set_content_mode
-          mode: 0 # Idle
+          mode: CONTENT_IDLE
+
+    on_turn_off: 
+      - logger.log: "media_player on_turn_off"
+      # MP aus → Idle (0)
+      - script.execute:
+          id: set_content_mode
+          mode: CONTENT_IDLE
 
     on_mute: 
       - logger.log: "media_player on_mute"
@@ -903,7 +905,7 @@ voice_assistant:
     # VA hört zu → Listening (1)
     - script.execute:
         id: set_content_mode
-        mode: 1 # VA Listening
+        mode: CONTENT_LISTENING
 
   on_start:
     - logger.log: "voice_assistant on_start"
@@ -919,7 +921,7 @@ voice_assistant:
     # Spracheingabe beendet → Thinking (2)
     - script.execute:
         id: set_content_mode
-        mode: 2 # VA Thinking
+        mode: CONTENT_THINKING
 
   on_stt_vad_start:
     - logger.log: "voice_assistant on_vad_start"
@@ -936,23 +938,7 @@ voice_assistant:
     # TTS spricht → Speaking (3)
     - script.execute:
         id: set_content_mode
-        mode: 3 # VA Speaking
-
-  # on_tts_stream_start:
-  #   - logger.log: "voice_assistant on_tts_stream_start"
-  #   # TTS spricht → Speaking (3)
-  #   - script.execute:
-  #       id: set_content_mode
-  #       mode: 3
-
-  # on_tts_stream_end:
-  #   - logger.log: "voice_assistant on_tts_stream_end"
-  #   # TTS fertig → zurück zu Idle (0)
-  #   - script.execute:
-  #       id: set_content_mode
-  #       mode: 0
-  #   # Restart only mWW if enabled; streaming wake words automatically restart
-  #   - micro_wake_word.start:
+        mode: CONTENT_SPEAKING
 
   on_tts_end:
     - lambda:
@@ -962,7 +948,7 @@ voice_assistant:
         args: [id(text_message).c_str()]
     - script.execute:
         id: set_content_mode
-        mode: 0 # idle
+        mode: CONTENT_IDLE
 
   on_idle:
     - logger.log: "voice_assistant on_idle"
@@ -982,7 +968,7 @@ voice_assistant:
     # Fehler → erst zurück zu Idle (0), dann zu Error(5), der geht dann zurück auf idle(0)
     - script.execute:
         id: set_content_mode
-        mode: 0
+        mode: CONTENT_IDLE
     - script.execute:
         id: show_error_overlay
         msg: !lambda |
@@ -1045,7 +1031,7 @@ globals:
   - id: content_mode
     type: int
     restore_value: False
-    initial_value: "-1" # Boot
+    initial_value: "-1"  # BOOT
   - id: overlay_mode
     type: int
     restore_value: False
@@ -1070,7 +1056,7 @@ button:
       - media_player.stop: hw_media_player
       - script.execute:
           id: set_content_mode
-          mode:  0
+          mode:  CONTENT_IDLE
 number:
   - platform: template
     id: page_info_duration
@@ -1110,7 +1096,7 @@ number:
 script:
   - id: set_content_mode
     parameters:
-      mode: int # neuer content mode
+      mode: int
     then:
       - logger.log:
           format: "script set_content_mode %d"
@@ -1119,7 +1105,7 @@ script:
           // Mode setzen
           id(content_mode) = mode;
           // mit HA synchronisieren
-          id(content_mode_number).publish_state(mode);
+          id(content_mode_number).publish_state(int(mode));
 
           // LED-Effekt auswählen (neue Namen)
           std::string effect = "Effect Content " + std::to_string(mode);
