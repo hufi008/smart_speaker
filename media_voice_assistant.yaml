@@ -83,16 +83,9 @@ api:
   encryption:
     key: !secret api_encryption_key
   on_client_connected:
-    then:
       - logger.log: "api on_client_connect"
-      - lambda: |-
-          float vol = id(volume_number).state / 100.0f;
-          ESP_LOGI("boot", "Restored HA volume_number: %.1f", vol); 
-          id(hw_speaker)->set_volume(vol);
-          ESP_LOGI("boot", "Setting speaker volume to %.2f", vol);
 
   on_client_disconnected:
-    then:
       - logger.log: "api on_client_disconnect"
 
 ota:
@@ -315,8 +308,8 @@ light:
           name: "Effect Overlay 1"
           update_interval: 20ms
           lambda: |-
-            float vol = id(hw_speaker)->get_volume();
-            if (id(hw_speaker)->get_mute_state()) {
+            float vol = id(hw_media_player).volume;
+            if (id(hw_media_player).is_muted()) {
               vol = 0.0f;
             }
 
@@ -396,25 +389,13 @@ binary_sensor:
     id: btn_left
     pin: ${btn_3_pin}
     on_click:
-      - lambda: |-
-          float vol = id(hw_speaker)->get_volume();
-          vol -= 0.05;
-          if (vol < 0.0f) vol = 0.0f;
-          id(hw_speaker)->set_volume(vol);  
-          id(volume_number).publish_state(vol * 100.0f);
-          id(show_volume_overlay).execute();
+      media_player.volume_up: hw_media_player
 
   - platform: gpio
     id: btn_right
     pin: ${btn_4_pin}
     on_click:
-      - lambda: |-
-          float vol = id(hw_speaker)->get_volume();
-          vol += 0.05;
-          if (vol > 1.0f) vol = 1.0f;
-          id(hw_speaker)->set_volume(vol);
-          id(volume_number).publish_state(vol * 100.0f);
-          id(show_volume_overlay).execute();
+      media_player.volume_down: hw_media_player
 
 # Icons - look in https://pictogrammers.com/library/mdi/
 image:
@@ -557,7 +538,7 @@ display:
       else if (id(hw_media_player).state == media_player::MEDIA_PLAYER_STATE_ANNOUNCING)
         it.image(80, 0, id(icon_mp_announce));
 
-      if (id(hw_speaker)->get_mute_state())
+      if (id(hw_media_player).is_muted())
         it.image(64, 0, id(icon_mute));
       if (id(hw_microphone)->get_mute_state())
         it.image(48, 0, id(icon_deaf));
@@ -590,8 +571,8 @@ display:
           it.print(0, 0, id(font_medium), "VOLUME");
           it.image(0, y1, id(icon_volume));
 
-          float vol = id(hw_speaker)->get_volume();
-          it.printf(xc+16, y1, id(font_medium), TextAlign::CENTER, "VOL %.0f%%", vol * 100.0f);
+          float vol = id(hw_media_player).volume;
+          it.printf(xc+16, y1, id(font_large), TextAlign::CENTER, "%.0f%%", vol * 100.0f);
           it.filled_rectangle(40, 50, vol * 80, 14);
           return;
         }
@@ -1091,18 +1072,6 @@ button:
           id: set_content_mode
           mode:  0
 number:
-  - platform: template
-    id: volume_number
-    name: "Speaker Vol"
-    min_value: 0
-    max_value: 100
-    step: 5
-    optimistic: true
-    restore_value: True
-    set_action:
-      - lambda: |-
-          id(hw_speaker)->set_volume(float(x) / 100.0f);
-          id(show_volume_overlay).execute();
   - platform: template
     id: page_info_duration
     name: "Info Speed"
