@@ -71,3 +71,36 @@ namespace ContentUtils {
     }
 }
 */
+
+enum OverlayMode : int {
+    OVERLAY_NONE     = 0,
+    OVERLAY_VOLUME   = 1,
+    OVERLAY_ERROR    = 2,
+};
+
+static const char* overlay_mode_names[] = {
+  "NONE",
+  "VOLUME",
+  "ERROR"
+};
+
+inline const char* overlay_mode_to_string(OverlayMode mode) {
+  int idx = mode;
+  if (idx < OVERLAY_NONE || idx > OVERLAY_ERROR) return "UNKNOWN";
+  return OVERLAY_mode_names[idx];
+}
+
+inline const char* overlay_mode_to_string(int idx) {
+  return overlay_mode_to_string(static_cast<OverlayMode>(idx));
+}
+
+inline int string_to_overlay_mode_int(std::string name) {
+  for (int i = 0; i <= 7; i++) {
+    if (name == overlay_mode_names[i]) {
+      return i;
+    }
+  }
+  
+  return 1; // Standardmäßig IDLE zurückgeben, falls nichts passt
+}
+
