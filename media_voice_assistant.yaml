@@ -47,7 +47,7 @@ esphome:
     board_build.flash_mode: dio
     build_flags: "-DBOARD_HAS_PSRAM"
   includes: 
-    - content_mode_enum.h
+    - content_mode_enum.h      
   on_boot:
     priority: 200
     then:
@@ -192,13 +192,96 @@ light:
           name: "Color Wipe"
       - pulse:
           name: "Pulse"
-          min_brightness: 25%
-          max_brightness: 75%
-          transition_length: 1s
-          update_interval: 2s
-      # Effect Mode -1 - Booting
+      - pulse:
+          name: "Soft Pulse"
+          transition_length: 800ms
+          update_interval: 20ms
+          min_brightness: 10%
+          max_brightness: 80%
       - addressable_lambda:
-          name: "Effect Content -1"
+          name: "Warm Glow"
+          update_interval: 40ms
+          lambda: |-
+            static uint8_t t = 0;
+            t += 2;
+            float b = (sin(t / 20.0f) + 1.0f) * 0.4f + 0.2f;
+            for (int i = 0; i < it.size(); i++) {
+              it[i] = esphome::Color(255 * b, 120 * b, 20 * b);
+            }
+      - addressable_scan:
+          name: "Sweep"
+          move_interval: 40ms
+          scan_width: 4
+      - addressable_lambda:
+          name: "Neon Ring"
+          update_interval: 30ms
+          lambda: |-
+            static uint16_t pos = 0;
+            pos++;
+            for (int i = 0; i < it.size(); i++) {
+              float d = fabs((i - pos) % it.size());
+              float b = exp(-d * 0.25f);
+              it[i] = esphome::Color(0, 255 * b, 180 * b);
+            }
+      - addressable_rainbow:
+          name: "Soft Rainbow"
+          speed: 4
+          width: 80
+      - addressable_lambda:
+          name: "Sparkle Fade"
+          update_interval: 25ms
+          lambda: |-
+            for (int i = 0; i < it.size(); i++) {
+              it[i].fade_to_black(20);
+            }
+            int p = random_uint32() % it.size();
+            it[p] = esphome::Color(255, 255, 255);
+      - pulse:
+          name: "Breathing Blue"
+          transition_length: 1200ms
+          update_interval: 20ms
+          min_brightness: 5%
+          max_brightness: 60%
+      - addressable_lambda:
+          name: "Thinking Dots"
+          update_interval: 60ms
+          lambda: |-
+            static uint8_t t = 0;
+            t++;
+            for (int i = 0; i < it.size(); i++) {
+              float b = (sin((i + t) / 2.5f) + 1.0f) * 0.5f;
+              it[i] = esphome::Color(0, 100 * b, 255 * b);
+            }
+      - addressable_lambda:
+          name: "Blue White"
+          update_interval: 30ms
+          lambda: |-
+            float t = (sin(millis() / 200.0f) + 1) / 2;  // 0–1 Puls
+            uint8_t b = 100 + (uint8_t)(t * 155);        // 100–255
+
+            for (int i = 0; i < it.size(); i++) {
+              it[i] = Color(b, b, 255);  // helles Blau-Weiß
+            }
+      - addressable_lambda:
+          name: "Green Power"
+          update_interval: 40ms
+          lambda: |-
+            int count = it.size();
+            float t = (sin(millis() / 150.0f) + 1) / 2;  // 0–1
+            int level = (int)(t * count);
+
+            for (int i = 0; i < count; i++) {
+              if (i < level) {
+                it[i] = Color(0, 200, 50);  // grün
+              } else {
+                it[i] = Color(0, 20, 5);    // dunkles Grün
+              }
+            }
+
+      # Content Mode Effects
+      # Effect CONTENT_BOOT
+      - addressable_lambda:
+          name: "Effect CONTENT_BOOT"
           update_interval: 50ms
           lambda: |-
             int value = 16 + (millis() / 40);
@@ -207,18 +290,17 @@ light:
             for (int i = 0; i < it.size(); i++) {
               it[i] = Color(0, 0, value);
             }
-      # Content Mode Effects
-      # Effect Mode 0 - Idle
+      # Effect CONTENT_IDLE
       - addressable_lambda:
-          name: "Effect Content 0"
+          name: "Effect CONTENT_IDLE"
           update_interval: 30ms
           lambda: |-
             for (int i = 0; i < it.size(); i++) {
               it[i] = Color(0, 0, 0);
             }
-      # Effect Mode 1 - Listening
+      # Effect CONTENT_LISTEN
       - addressable_lambda:
-          name: "Effect Content 1"
+          name: "Effect CONTENT_LISTEN"
           update_interval: 20ms
           lambda: |-
             const int count = ${led_count};
@@ -235,71 +317,63 @@ light:
 
               it[i] = esphome::Color(0, b, 255);  // Cyan-Blau
             }
-      # Effect Mode 2 - Thinking
+      # Effect CONTENT_THINK
       - addressable_lambda:
-          name: "Effect Content 2"
+          name: "Effect CONTENT_THINK"
           update_interval: 20ms
           lambda: |-
             int pos = (millis() / 40) % it.size();
+            pos = it.size() - pos;
             for (int i = 0; i < it.size(); i++) {
               int d = abs(i - pos);
               int b = max(0, 150 - d * 40);
               it[i] = Color(b, 0, b);
             }
-      # Effect Mode 3 - Speaking
+      # Effect CONTENT_ANNOUNCE
       - addressable_lambda:
-          name: "Effect Content 3"
-          update_interval: 30ms
+          name: "Effect CONTENT_ANNOUNCE"
+          update_interval: 20ms
           lambda: |-
-            for (int i = 0; i < it.size(); i++) {
-              float h = (sin((millis() / 150.0f) + i * 0.5f) + 1) / 2;  // 0–1
-              it[i] = Color(int(255 * h), int(180 * h), 0);
-            }
-      # Effect Mode 4 - Player
-      - addressable_lambda:
-          name: "Effect Content 4"
-          update_interval: 80ms
-          lambda: |-
-            for (int i = 0; i < it.size(); i++) {
-              it[i] = Color(0, 40, 120);  // ruhiges Blau
-            }
-      # Effect Mode 5 - MP Announing
-      - addressable_lambda:
-          name: "Effect Content 5"
-          update_interval: 30ms
-          lambda: |-
-            float t = (sin(millis() / 200.0f) + 1) / 2;  // 0–1 Puls
-            uint8_t b = 100 + (uint8_t)(t * 155);        // 100–255
+            const int count = ${led_count};
 
-            for (int i = 0; i < it.size(); i++) {
-              it[i] = Color(b, b, 255);  // helles Blau-Weiß
-            }
-      # Effect Mode 6 - MP Playing
-      - addressable_lambda:
-          name: "Effect Content 6"
-          update_interval: 40ms
-          lambda: |-
-            int count = it.size();
-            float t = (sin(millis() / 150.0f) + 1) / 2;  // 0–1
-            int level = (int)(t * count);
+            // Position des Scans (läuft von 0 bis count-1)
+            int pos = (millis() / 40) % count;
 
             for (int i = 0; i < count; i++) {
-              if (i < level) {
-                it[i] = Color(0, 200, 50);  // grün
-              } else {
-                it[i] = Color(0, 20, 5);    // dunkles Grün
-              }
+              // Abstand zur Scan-Position
+              int d = abs(i - pos);
+
+              // Helligkeit abhängig vom Abstand (weicher Abfall)
+              int b = max(0, 180 - d * 60);  // 180 = hell, 60 = Abfall pro LED
+
+              it[i] = esphome::Color(b+75, b, b+75);  // Cyan-Blau
             }
-      # Effect Mode 7 - MP Pasing
+      # Effect CONTENT_PLAY
+      - addressable_rainbow:
+          name: "Effect CONTENT_PLAY"
+          speed: 4
+          width: 12
+      # Effect CONTENT_PAUSE
       - addressable_lambda:
-          name: "Effect Content 7"
+          name: "Effect CONTENT_PAUSE"
           update_interval: 50ms
           lambda: |-
             float t = (sin(millis() / 500.0f) + 1) / 2;  // langsames Atmen
-            uint8_t y = (uint8_t)(t * 180);
+            uint8_t y = 60 + (uint8_t)(t * 120);
 
             for (int i = 0; i < it.size(); i++) {
               it[i] = Color(y, y, 0);  // Gelb
+            }
+      # Effect CONTENT_ALARM
+      - addressable_lambda:
+          name: "Effect CONTENT_ALARM"
+          update_interval: 50ms
+          lambda: |-
+            float t = (sin(millis() / 250.0f) + 1) / 2;  // langsames Atmen
+            uint8_t y = 60 + (uint8_t)(t * 120);
+
+            for (int i = 0; i < it.size(); i++) {
+              it[i] = Color(y, 0, 0);  // Rot
             }
 
 
@@ -376,7 +450,6 @@ sensor:
       name: "Luftdruck"
     update_interval: 30s
 
-
 # Buttons TTP223
 binary_sensor:
   - platform: gpio
@@ -401,11 +474,11 @@ binary_sensor:
 
 # Icons - look in https://pictogrammers.com/library/mdi/
 image:
-  - file: "https://media.esphome.io/logo/vertical/Logo%20Vertical%20-%20Monochrome%20Blue.svg"
+  - file: "https://media.esphome.io/logo/logo-text-on-dark.svg"
     id: logo_esphome
     type: binary
-    resize: 44x44
-    invert_alpha: False
+    resize: 128x40
+    invert_alpha: True
   # - file: "mdi:wifi"
   #   id: icon_wifi
   #   type: binary
@@ -458,18 +531,36 @@ image:
     id: icon_deaf
     type: binary
     resize: 16x16
+  ####################################    
   - file: "mdi:ear-hearing"
-    id: icon_listening
+    id: icon_listen
     type: binary
     resize: 32x32
   - file: "mdi:thought-bubble-outline"
-    id: icon_thinking
+    id: icon_think
     type: binary
     resize: 32x32
   - file: "mdi:waveform"
-    id: icon_speaking
+    id: icon_announce
     type: binary
     resize: 32x32
+  - file: "mdi:play"
+    id: icon_play
+    type: binary
+    resize: 32x32
+  - file: "mdi:pause"
+    id: icon_pause
+    type: binary
+    resize: 32x32
+  - file: "mdi:alarm"
+    id: icon_alarm
+    type: binary
+    resize: 32x32
+  - file: "mdi:help"
+    id: icon_unknown
+    type: binary
+    resize: 32x32
+  ####################################
   - file: "mdi:knob"
     id: icon_volume
     type: binary
@@ -484,18 +575,23 @@ font:
   - file: "gfonts://Roboto"
     id: font_small
     size: 9
-
+    glyphsets:
+      - GF_Latin_Kernel 
   - file: "gfonts://Roboto"
     id: font_medium
     size: 14
-
+    glyphsets:
+      - GF_Latin_Kernel 
   - file: "gfonts://Roboto"
     id: font_large
     size: 22
-
+    glyphsets:
+      - GF_Latin_Kernel 
   - file: "gfonts://Roboto"
     id: font_huge
     size: 28
+    glyphsets:
+      - GF_Latin_Kernel 
 
 # Display ssd1306
 display:
@@ -507,43 +603,47 @@ display:
       // -------------------------------------------------------
       // 1a. GELBER HEADER-BEREICH (Pixel 0–15)
       // -------------------------------------------------------
+      {
+        // Titel links
+        it.print(0, 0, id(font_medium), content_mode_to_string(id(content_mode)));
 
-      // Icons rechts (jeweils 16x16)
-      // WiFi Signalstärke
-      if (id(wifi_id).is_connected()) {
-          //it.image(112, 0, id(icon_wifi));
-          float strength = id(wifi_rssi).state;
+        // Icons rechts (jeweils 16x16)
+        // WiFi Signalstärke
+        if (id(wifi_id).is_connected()) {
+            //it.image(112, 0, id(icon_wifi));
+            float strength = id(wifi_rssi).state;
 
-          if (strength > -55)
-              it.image(112, 0, id(icon_wifi_4));
-          else if (strength > -65)
-              it.image(112, 0, id(icon_wifi_3));
-          else if (strength > -75)
-              it.image(112, 0, id(icon_wifi_2));
+            if (strength > -55)
+                it.image(112, 0, id(icon_wifi_4));
+            else if (strength > -65)
+                it.image(112, 0, id(icon_wifi_3));
+            else if (strength > -75)
+                it.image(112, 0, id(icon_wifi_2));
+            else
+                it.image(112, 0, id(icon_wifi_1));
+        }
+
+        if (id(api_id).is_connected()) {
+          if (id(va).get_api_connection() != nullptr)
+            it.image(96, 0, id(icon_va));
           else
-              it.image(112, 0, id(icon_wifi_1));
-      }
+            it.image(96, 0, id(icon_api));
+        }
 
-      if (id(api_id).is_connected()) {
-        if (id(va).get_api_connection() != nullptr)
-          it.image(96, 0, id(icon_va));
-        else
-          it.image(96, 0, id(icon_api));
-      }
+        if (id(hw_media_player).state == media_player::MEDIA_PLAYER_STATE_IDLE)
+          it.image(80, 0, id(icon_mp_idle));
+        else if (id(hw_media_player).state == media_player::MEDIA_PLAYER_STATE_PLAYING)
+          it.image(80, 0, id(icon_mp_play));
+        else if (id(hw_media_player).state == media_player::MEDIA_PLAYER_STATE_PAUSED)
+          it.image(80, 0, id(icon_mp_pause));
+        else if (id(hw_media_player).state == media_player::MEDIA_PLAYER_STATE_ANNOUNCING)
+          it.image(80, 0, id(icon_mp_announce));
 
-      if (id(hw_media_player).state == media_player::MEDIA_PLAYER_STATE_IDLE)
-        it.image(80, 0, id(icon_mp_idle));
-      else if (id(hw_media_player).state == media_player::MEDIA_PLAYER_STATE_PLAYING)
-        it.image(80, 0, id(icon_mp_play));
-      else if (id(hw_media_player).state == media_player::MEDIA_PLAYER_STATE_PAUSED)
-        it.image(80, 0, id(icon_mp_pause));
-      else if (id(hw_media_player).state == media_player::MEDIA_PLAYER_STATE_ANNOUNCING)
-        it.image(80, 0, id(icon_mp_announce));
-
-      if (id(hw_media_player).is_muted())
-        it.image(64, 0, id(icon_mute));
-      if (id(hw_microphone)->get_mute_state())
+        if (id(hw_media_player).is_muted())
+          it.image(64, 0, id(icon_mute));
+        if (id(hw_microphone)->get_mute_state())
         it.image(48, 0, id(icon_deaf));
+      }
 
       // -------------------------------------------------------
       // 1b. BLAUER CONTENT-BEREICH (Pixel 16–63)
@@ -551,14 +651,12 @@ display:
       // Trennlinie zwischen GELB (oben) und BLAU (unten)
       it.line(0, 16, 128, 16);
 
-
-
       // Positionen
       constexpr int y0 = 46;
-      constexpr int y1 = 32;
-      constexpr int y2 = 56;
-      constexpr int xc = 128 / 2;
-      constexpr int yc = 64 / 2;
+      constexpr int y1 = 28;
+      constexpr int y2 = 58;
+      constexpr int xc = 64;
+      constexpr int yc = 40;
 
       // -------------------------------------------------------
       // 2. OVERLAY ENGINE
@@ -574,7 +672,7 @@ display:
           it.image(0, y1, id(icon_volume));
 
           float vol = id(hw_media_player).volume;
-          it.printf(xc+16, y1, id(font_large), TextAlign::CENTER, "%.0f%%", vol * 100.0f);
+          it.printf(xc+16, yc, id(font_large), TextAlign::CENTER, "%.0f%%", vol * 100.0f);
           it.filled_rectangle(40, 50, vol * 80, 14);
           return;
         }
@@ -586,7 +684,7 @@ display:
           it.print(0, 0, id(font_medium), "ERROR");
           it.image(0, y1, id(icon_error));
 
-          it.printf(xc, y1, id(font_medium), TextAlign::CENTER, "%s", id(error_message).c_str());
+          it.printf(xc, yc, id(font_medium), TextAlign::CENTER, "%s", id(error_message).c_str());
           return;
         }
 
@@ -601,11 +699,10 @@ display:
       switch (id(content_mode)) {
 
         // -----------------------------------------
-        // -1: Bootscreen
+        // 0: Bootscreen
         // -----------------------------------------
         case CONTENT_BOOT: {
-          it.print(0, 0, id(font_medium), "BOOTING");
-          it.image(42, 20, id(logo_esphome));
+          it.image(0, 18, id(logo_esphome));
           it.printf(xc, y2, id(font_medium), TextAlign::CENTER,
                     "%s",
                     "${version}" );
@@ -613,162 +710,63 @@ display:
         }
 
         // -------------------------
-        // 0: IDLE
+        // 1: IDLE
         // -------------------------
         case CONTENT_IDLE: {
-          it.print(0, 0, id(font_medium), "INFO");
-          int page_duration = id(page_info_duration).state * 1000;
-          int active_subpage = (esphome::millis() / page_duration) % 6;
-
-          static const char* wdays[]    = {"So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"};
-          static const char* weekdays[] = {"Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"};
-
-          auto t = id(esptime).now();
-          float temp  = id(room_temp).state;
-          float hum   = id(room_hum).state;
-          float press = id(room_press).state;
-
-
-          switch (active_subpage) {
-
-            // -------------------------------------------------
-            // 0.0: Uhrzeit
-            // -------------------------------------------------
-            case 0: {
-              it.printf(xc, y0, id(font_huge), TextAlign::CENTER,
-                        "%02d:%02d",
-                        t.hour, t.minute);
-              break;
-            }
-
-            // -------------------------------------------------
-            // 0.1: Datum
-            // -------------------------------------------------
-            case 1: {
-              it.printf(xc, y0, id(font_huge), TextAlign::CENTER,
-                        "%02d.%02d.%02d",
-                        t.day_of_month, t.month, t.year % 100);
-              break;
-            }
-
-            // -------------------------------------------------
-            // 0.2: Wochentag
-            // -------------------------------------------------
-            case 2: {
-              it.printf(xc, y0, id(font_large), TextAlign::CENTER,
-                        "%s",
-                        weekdays[t.day_of_week]);
-              break;
-            }
-
-            // -------------------------------------------------
-            // 0.3: Temp / Press & Hum
-            // -------------------------------------------------
-            case 3: {
-              it.printf(xc, y0, id(font_huge), TextAlign::CENTER, 
-                        "%.1f°C",
-                        temp);
-              break;
-            }
-
-            // -------------------------------------------------
-            // 0.4: Hum / Temp & Press
-            // -------------------------------------------------
-            case 4: {
-              it.printf(xc, y0, id(font_huge), TextAlign::CENTER,
-                        "%.0f%%rF",
-                        hum);
-              break;
-            }
-
-            // -------------------------------------------------
-            // 0.5: Press / Temp & Hum
-            // -------------------------------------------------
-            case 5: {
-              it.printf(xc, y0, id(font_huge), TextAlign::CENTER,
-                        "%'.0fhPa",
-                        press);
-              break;
-            }
-            default:
-              break;
-          }
+          it.print(xc, yc, id(font_huge), TextAlign::CENTER, id(idle_message).c_str());
           break;
         }
 
         // -------------------------
-        // 1: LISTENING
+        // 2: LISTEN
         // -------------------------
-        case CONTENT_LISTENING: {
-          it.print(0, 0, id(font_medium), "LISTEN");
-          it.printf(xc+16, y1, id(font_medium), TextAlign::CENTER, "%s", id(text_message).c_str());
-          it.image(0, 32, id(icon_listening));          
+        case CONTENT_LISTEN: {
+          it.print(xc+16, yc, id(font_medium), TextAlign::CENTER, "Ja bitte");
+          it.image(0, y1, id(icon_listen));          
           it.circle(110, 54, (millis() / 200) % 6 + 2);
           break;
         }
 
         // -------------------------
-        // 2: THINKING
+        // 3: THINK
         // -------------------------
-        case CONTENT_THINKING: {
-          it.print(0, 0, id(font_medium), "THINKING");
-          it.printf(xc+16, y1, id(font_medium), TextAlign::CENTER, "%s", id(text_message).c_str());
-          it.image(0, 32, id(icon_thinking));          
+        case CONTENT_THINK: {
+          it.print(xc+16, yc, id(font_medium), TextAlign::CENTER, id(command_message).c_str());
+          it.image(0, y1, id(icon_think));          
           it.filled_circle(110, 54, (millis() / 200) % 6 + 2);
           break;
         }
 
         // -------------------------
-        // 3: SPEAKING (TTS)
+        // 4: ANNOUNCE
         // -------------------------
-        case CONTENT_SPEAKING: {
-          it.print(0, 0, id(font_medium), "SPEAKING");
-          it.printf(xc+16, y1, id(font_medium), TextAlign::CENTER, "%s", id(text_message).c_str());
-          it.image(0, 32, id(icon_speaking));          
-          for (int i = 0; i < 5; i++) {
-            int h = (sin((millis() / 150.0) + i) + 1) * 8;
-            it.filled_rectangle(40 + i * 16, 60 - h, 10, h);
-          }
+        case CONTENT_ANNOUNCE: {
+          it.print(xc+16, yc, id(font_medium), TextAlign::CENTER, id(announce_message).c_str());
+          it.image(0, y1, id(icon_announce));
           break;
         }
 
         // -------------------------
-        // 4: MEDIA
+        // 5: PLAY
         // -------------------------
-        case CONTENT_PLAYER: {
-          it.print(0, 0, id(font_medium), "MEDIA");
-          it.printf(xc+16, y1, id(font_medium), TextAlign::CENTER, "%s", id(text_message).c_str());
-          it.image(0, 32, id(icon_speaking));
+        case CONTENT_PLAY: {
+          it.image(0, y1, id(icon_play));
           break;
         }
 
         // -------------------------
-        // 5: ANNOUNCING
+        // 6: PAUSE
         // -------------------------
-        case CONTENT_ANNOUNCING: {
-          it.print(0, 0, id(font_medium), "ANNOUNCING");
-          it.printf(xc+16, y1, id(font_medium), TextAlign::CENTER, "%s", id(text_message).c_str());
-          it.image(0, 32, id(icon_speaking));
+        case CONTENT_PAUSE: {
+          it.image(0, y1, id(icon_pause));
           break;
         }
 
         // -------------------------
-        // 6: PLAYING
+        // 7: ALARM
         // -------------------------
-        case CONTENT_PLAYING: {
-          it.print(0, 0, id(font_medium), "PLAYING");
-          it.printf(xc+16, y1, id(font_medium), TextAlign::CENTER, "%s", id(text_message).c_str());
-          it.image(0, 32, id(icon_speaking));
-          break;
-        }
-
-        // -------------------------
-        // 7: PAUSING
-        // -------------------------
-        case CONTENT_PAUSING: {
-          it.print(0, 0, id(font_medium), "PAUSING");
-          it.printf(xc+16, y1, id(font_medium), TextAlign::CENTER, "%s", id(text_message).c_str());
-          it.image(0, 32, id(icon_speaking));
+        case CONTENT_ALARM: {
+          it.image(0, y1, id(icon_alarm));
           break;
         }
 
@@ -777,8 +775,7 @@ display:
         // -------------------------
         default: {
           it.print(0, 0, id(font_medium), "UNKNOWN");
-          it.printf(xc+16, y1, id(font_medium), TextAlign::CENTER, "%s", id(text_message).c_str());
-          it.image(0, 32, id(icon_speaking));
+          it.image(0, y1, id(icon_unknown));
           break;
         }
       }
@@ -814,21 +811,21 @@ media_player:
       # VA antwortet → Announcing (5)
       - script.execute:
           id: set_content_mode
-          mode: CONTENT_ANNOUNCING
+          mode: CONTENT_ANNOUNCE
 
     on_play: 
       - logger.log: "media_player on_play"
       # MP spielt Media → Playing (6)
       - script.execute:
           id: set_content_mode
-          mode: CONTENT_PLAYING
+          mode: CONTENT_PLAY
 
     on_pause: 
       - logger.log: "media_player on_pause"
       # MP pausiert Media → Playing (7)
       - script.execute:
           id: set_content_mode
-          mode: CONTENT_PAUSING
+          mode: CONTENT_PAUSE
 
     on_idle: 
       - logger.log: "media_player on_idle"
@@ -862,7 +859,7 @@ media_player:
     on_volume:
       - if:
           condition:
-            lambda: 'return id(content_mode) != -1;'
+            lambda: 'return id(content_mode) != CONTENT_BOOT;'
           then:
             - logger.log: "media_player on_volume"
             - script.execute: show_volume_overlay
@@ -902,26 +899,25 @@ voice_assistant:
 
   on_listening:
     - logger.log: "voice_assistant on_Listening"
-    # VA hört zu → Listening (1)
+    # VA hört zu → Listening
     - script.execute:
         id: set_content_mode
-        mode: CONTENT_LISTENING
+        mode: CONTENT_LISTEN
 
   on_start:
     - logger.log: "voice_assistant on_start"
 
   ######################################## stt ################################
-  # Ende der Sprachantwort
   on_stt_end:
     - lambda:
-        id(text_message) = "Q:"+x;
+        id(command_message) = "Q:"+x;
     - logger.log:
         format: "voice_assistant on_stt_end: %s"
-        args: [id(text_message).c_str()]
-    # Spracheingabe beendet → Thinking (2)
+        args: [id(command_message).c_str()]
+    # Spracheingabe beendet → Thinking
     - script.execute:
         id: set_content_mode
-        mode: CONTENT_THINKING
+        mode: CONTENT_THINK
 
   on_stt_vad_start:
     - logger.log: "voice_assistant on_vad_start"
@@ -931,21 +927,15 @@ voice_assistant:
   ######################################### tts ################################
   on_tts_start:
     - lambda:
-        id(text_message) = "A:"+x;
+        id(announce_message) = "A:"+x;
     - logger.log:
         format: "voice_assistant on_tts_start: %s"
-        args: [id(text_message).c_str()]
-    # TTS spricht → Speaking (3)
-    - script.execute:
-        id: set_content_mode
-        mode: CONTENT_SPEAKING
+        args: [id(announce_message).c_str()]
 
   on_tts_end:
-    - lambda:
-        id(text_message) = "URL:"+x;
     - logger.log:
         format: "voice_assistant on_tts_end: %s"
-        args: [id(text_message).c_str()]
+        args: ["x.c_str()"]
     - script.execute:
         id: set_content_mode
         mode: CONTENT_IDLE
@@ -1026,6 +1016,61 @@ micro_wake_word:
 # 1 = Volume Overlay
 # 2 = Error Overlay
 
+# interval für idle page
+interval:
+  - interval: 15s
+    id: idle_page_interval
+    then:
+      - lambda: |-
+          int page_duration = id(page_info_duration).state * 1000;
+          int idx = (esphome::millis() / page_duration) % 6;
+
+          char buffer[192];
+
+          // Deutsche Wochentage
+          static const char* weekdays[] = {
+            "Sonntag", "Montag", "Dienstag", "Mittwoch",
+            "Donnerstag", "Freitag", "Samstag"
+          };
+
+          auto now = id(esptime).now();
+
+          switch (idx) {
+
+            case 0:  // Uhrzeit
+              snprintf(buffer, sizeof(buffer), "%02d:%02d",
+                       now.hour, now.minute);
+              break;
+
+            case 1:  // Datum
+              snprintf(buffer, sizeof(buffer), "%02d.%02d.%02d",
+                       now.day_of_month, now.month, now.year % 100);
+              break;
+
+            case 2:  // Wochentag
+              snprintf(buffer, sizeof(buffer), "%s",
+                       weekdays[now.day_of_week-1]);
+              break;
+
+            case 3:  // Temperatur
+              snprintf(buffer, sizeof(buffer), "%.1f °C",
+                       id(room_temp).state);
+              break;
+
+            case 4:  // Luftfeuchtigkeit
+              snprintf(buffer, sizeof(buffer), "%.0f%% rF",
+                       id(room_hum).state);
+              break;
+
+            case 5:  // Luftdruck
+              snprintf(buffer, sizeof(buffer), "%.0f hPa",
+                       id(room_press).state);
+              break;
+          }
+
+          id(idle_message) = buffer;
+
+
 # globals - Application Variablen
 globals:
   - id: content_mode
@@ -1037,12 +1082,18 @@ globals:
     restore_value: False
     initial_value: "0" # kein overlay
 
+  - id: idle_message
+    type: std::string
+    initial_value: "\"--:--\""
+  - id: command_message
+    type: std::string
+    initial_value: "\"command\""
+  - id: announce_message
+    type: std::string
+    initial_value: "\"announce\""
   - id: error_message
     type: std::string
-    initial_value: "\"\""
-  - id: text_message
-    type: std::string
-    initial_value: ""
+    initial_value: "\"error\""
 
 # configuration - Bedienelemente im HA - Gerät
 button:
@@ -1072,8 +1123,8 @@ number:
     id: content_mode_number
     name: "Content Mode"
     entity_category: diagnostic
-    min_value: -1
-    max_value: 8
+    min_value: 0
+    max_value: 7
     step: 1
     optimistic: true
     set_action:
@@ -1091,6 +1142,48 @@ number:
       - lambda: |-
           id(overlay_mode) = int(x);
           id(display_id).update();
+select:
+  - platform: template
+    id: content_mode_select
+    name: "Content Mode"
+    entity_category: diagnostic
+    initial_option: "BOOT"
+    icon: "mdi:fullscreen"
+    optimistic: true
+    options:
+      - "BOOT"
+      - "IDLE"
+      - "LISTEN"
+      - "THINK"
+      - "ANNOUNCE"
+      - "PLAY"
+      - "PAUSE"
+      - "ALARM"
+    set_action:
+      - lambda: |-
+          // Wandelt den Text (x) in die passende Zahl um
+          int idx = string_to_content_mode_int(x);
+
+          id(set_content_mode).execute(idx);
+  - platform: template
+    id: overlay_mode_select
+    name: "Overlay Mode"
+    entity_category: diagnostic
+    initial_option: "NONE"
+    icon: "mdi:fullscreen"
+    optimistic: true
+    options:
+      - "NONE"
+      - "VOLUME"
+      - "ERROR"
+    set_action:
+      - lambda: |-
+          /*
+          // Wandelt den Text (x) in die passende Zahl um
+          int idx = string_to_content_mode_int(x);
+
+          id(set_content_mode).execute(idx);
+          */
 
 # Zentrale Stelle für Systemreaktionen
 script:
@@ -1105,13 +1198,11 @@ script:
           // Mode setzen
           id(content_mode) = mode;
           // mit HA synchronisieren
-          id(content_mode_number).publish_state(int(mode));
+          id(content_mode_number).publish_state(mode);
+          id(content_mode_select).publish_state(mode);
 
           // LED-Effekt auswählen (neue Namen)
-          std::string effect = "Effect Content " + std::to_string(mode);
-          // auto call = id(hw_leds).turn_on();
-          // call.set_effect(effect.c_str());
-          // call.perform();
+          std::string effect = std::string("Effect CONTENT_") + content_mode_to_string(mode);
 
           id(hw_leds).turn_on().set_effect(effect).perform();
 
