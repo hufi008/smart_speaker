@@ -46,10 +46,17 @@ esphome:
     board_build.arduino.memory_type: qio_opi
     board_build.flash_mode: dio
     board_build.partitions: "../../../default_16MB.csv"
-    build_flags: "-DBOARD_HAS_PSRAM"    
+    build_flags:
+      - "-DBOARD_HAS_PSRAM" 
+      - "-DUSE_I2S_PORT_1"
   includes:
     - display_modes.h
   on_boot:
+    - priority: 600
+      then:
+        - globals.set:
+            id: is_booting
+            value: 'true'
     # früh
     - priority: 600
       then:
@@ -120,7 +127,21 @@ time:
     # Schaltet die Boot-Seite lautlos um, sobald die Zeit synchronisiert ist
     on_time_sync:
       then:
+        - if:
+            condition:
+              lambda: 'return id(is_booting);'
+            then:
+              - globals.set:
+                  id: is_booting
+                  value: 'false'
+              - logger.log: "Booting finished"
+              - script.execute:
+                  id: set_content_mode
+                  mode: CONTENT_IDLE
+            else:
+              - logger.log: "on_time_time_sync NOT_in_boot_state"
         - script.execute: on_time_time_sync
+
 
 ###################################################################################
 # Hardware
@@ -163,6 +184,7 @@ speaker:
     bits_per_sample: 16bit
     sample_rate: 48000
     channel: stereo
+    timeout: 50ms
 
   # B) Der digitale Audio-Mixer
   - platform: mixer
@@ -1001,11 +1023,11 @@ audio_file:
 
 media_source:
   - platform: audio_http
-    id: media_file_source
+    id: media_file_source                 # media-pipeline spielt nur hhtp ab
   - platform: audio_file
-    id: media_local_file_source     # NEU: Für die normale Musik-Pipeline
-  - platform: audio_file
-    id: announcement_file_source    # Bleibt für die Durchsagen-Pipeline
+    id: announcement_local_file_source    # für lokale sounds in der announce-pipeline
+  - platform: audio_http
+    id: announcement_file_source          # für TTS in der announce-pipeline
 
 #################################################################################
 # Magic
@@ -1022,7 +1044,6 @@ media_player:
       num_channels: 2
       sources:
         - media_file_source
-        - media_local_file_source
 
 
     announcement_pipeline:
@@ -1030,6 +1051,7 @@ media_player:
       sample_rate: 16000
       num_channels: 1
       sources:
+        - announcement_local_file_source
         - announcement_file_source
 
     volume_increment: 5%
@@ -1038,13 +1060,21 @@ media_player:
     volume_max: 100%
 
     on_announcement:
-      - script.execute: on_media_player_announcement
+      - if:
+          condition:
+            lambda: 'return id(content_mode) > CONTENT_BOOT;'
+          then:
+            - script.execute: on_media_player_announcement
     on_play:
       - script.execute: on_media_player_play
     on_pause:
       - script.execute: on_media_player_pause
     on_idle:
-      - script.execute: on_media_player_idle
+      - if:
+          condition:
+            lambda: 'return id(content_mode) > CONTENT_BOOT;'
+          then:
+            - script.execute: on_media_player_idle
     on_turn_on:
       - script.execute: on_media_player_turn_on
     on_turn_off:
@@ -1056,7 +1086,7 @@ media_player:
     on_volume:
       - if:
           condition:
-            lambda: 'return id(content_mode) != CONTENT_BOOT;'
+            lambda: 'return id(content_mode) > CONTENT_BOOT;'
           then:
             - script.execute: on_media_player_volume
     on_state:
@@ -1233,14 +1263,18 @@ interval:
 
 # globals - Application Variablen
 globals:
+  - id: is_booting
+    type: bool
+    restore_value: False
+    initial_value: "true"
   - id: content_mode
     type: int
     restore_value: False
-    initial_value: "-1"  # BOOT
+    initial_value: CONTENT_BOOT
   - id: overlay_mode
     type: int
     restore_value: False
-    initial_value: "0" # kein overlay
+    initial_value: OVERLAY_NONE
 
   - id: idle_message
     type: std::string
@@ -1353,13 +1387,18 @@ script:
           format: "script set_content_mode %d"
           args: [mode]
       - lambda: |-
+          // in der Bootphase wird nix geschaltet
+          if (id(is_booting)) return;
+
           // Mode setzen
           id(content_mode) = mode;
           // mit HA synchronisieren
           id(content_mode_number).publish_state(mode);
           id(content_mode_select).publish_state(mode);
 
-          // LED-Effekt auswählen (neue Namen)
+          if (id(overlay_mode) != OVERLAY_NONE) return;
+
+          // LED-Effekt auswählen -- CONTENT_MODE
           std::string effect = std::string("Effect CONTENT_") + content_mode_to_string(mode);
 
           id(hw_leds).turn_on().set_effect(effect).perform();
@@ -1374,16 +1413,27 @@ script:
           format: "script set_overlay_mode %d"
           args: [mode]
       - lambda: |-
+          // in der Bootphase wird nix geschaltet
+          if (id(is_booting)) return;
+
           // Mode setzen
           id(overlay_mode) = mode;
           // mit HA synchronisieren
           id(overlay_mode_number).publish_state(mode);
           id(overlay_mode_select).publish_state(mode);
 
-          // LED-Effekt auswählen (neue Namen)
-          std::string effect = std::string("Effect OVERLAY_") + overlay_mode_to_string(mode);
+          if(id(overlay_mode) == OVERLAY_NONE) {
+            mode = id(content_mode);
+            // LED-Effekt auswählen -- CONTENT_MODE
+            std::string effect = std::string("Effect CONTENT_") + content_mode_to_string(mode);
 
-          id(hw_leds).turn_on().set_effect(effect).perform();
+            id(hw_leds).turn_on().set_effect(effect).perform();
+          } else {
+            // LED-Effekt auswählen -- OVERLAY_MODE
+            std::string effect = std::string("Effect OVERLAY_") + overlay_mode_to_string(mode);
+
+            id(hw_leds).turn_on().set_effect(effect).perform();
+          }
 
           // Display aktualisieren
           id(display_id).update();
@@ -1426,10 +1476,17 @@ script:
   - id: on_esphome_boot_minus100
     then: 
       - logger.log: "on_esphome_boot_minus100"
+      - logger.log: "Warte auf Media Player..."
+      # Wartet dynamisch, bis der Player bereit und untätig im Speicher liegt
+      - wait_until:
+          condition:
+            media_player.is_idle: hw_media_player
+      
+      - logger.log: "Media Player ist bereit! Spiele Boot-Sound."
       - media_player.play_media:
           id: hw_media_player
           media_url: "audio-file://snd_boot"
-
+          announcement: True
 # wifi
   - id: on_wifi_connect
     then:
@@ -1449,12 +1506,7 @@ script:
   - id: on_time_time_sync
     then:
       - logger.log: "on_time_time_sync"
-      - delay: 222ms
-      # Zeit ist da → Boot verlassen → Idle
-      # todo: nur in boot_mode
-      - script.execute:
-          id: set_content_mode
-          mode: CONTENT_IDLE
+
 # media_player
   - id: on_media_player_announcement
     then:
@@ -1665,4 +1717,5 @@ script:
       - media_player.play_media:
           id: hw_media_player
           media_url: "audio-file://snd_wake"
+          announcement: True
 
