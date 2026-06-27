@@ -49,6 +49,7 @@ esphome:
     build_flags:
       - "-DBOARD_HAS_PSRAM" 
       - "-DUSE_I2S_PORT_1"
+      - "-I ../../../"
   includes:
     - display_modes.h
   on_boot:
@@ -767,22 +768,26 @@ font:
     id: font_small
     size: 9
     glyphsets:
-      - GF_Latin_Kernel
+      - GF_Latin_Core
+      - GF_Latin_Plus
   - file: "gfonts://Roboto"
     id: font_medium
     size: 14
     glyphsets:
-      - GF_Latin_Kernel
+      - GF_Latin_Core
+      - GF_Latin_Plus
   - file: "gfonts://Roboto"
     id: font_large
     size: 22
     glyphsets:
-      - GF_Latin_Kernel
+      - GF_Latin_Core
+      - GF_Latin_Plus
   - file: "gfonts://Roboto"
     id: font_huge
     size: 28
     glyphsets:
-      - GF_Latin_Kernel
+      - GF_Latin_Core
+      - GF_Latin_Plus
 
 # Display ssd1306
 display:
@@ -982,37 +987,6 @@ display:
         }
       }
 
-audio_file:
-  - id: snd_boot
-    file: "sounds/boot.wav"
-
-  - id: snd_wake
-    file: "sounds/wake.wav"
-
-  # - id: snd_thinking
-  #   file: "sounds/thinking.wav"
-
-  # - id: snd_notify
-  #   file: "sounds/notify.wav"
-
-  # - id: snd_pause
-  #   file: "sounds/pause.wav"
-
-  # - id: snd_error
-  #   file: "sounds/error.wav"
-
-  # - id: snd_success
-  #   file: "sounds/success.wav"
-
-  # - id: snd_turn_on
-  #   file: "sounds/turn_on.wav"
-
-  # - id: snd_turn_off
-  #   file: "sounds/turn_off.wav"
-
-  # - id: snd_red_alert
-  #   file: "sounds/red_alert.wav"
-
 media_source:
   - platform: audio_http
     id: media_file_source                 # media-pipeline spielt nur hhtp ab
@@ -1127,9 +1101,9 @@ voice_assistant:
         command: !lambda return x;
 
   on_stt_vad_start:
-    - logger.log: "voice_assistant on_vad_start"
+    - script.execute: on_voice_assistant_stt_vad_start
   on_stt_vad_end:
-    - logger.log: "voice_assistant on_stt_vad_end"
+    - script.execute: on_voice_assistant_stt_vad_end
 
   ######################################### tts ################################
   on_tts_start:
@@ -1252,6 +1226,37 @@ interval:
 
           id(idle_message) = buffer;
 
+
+audio_file:
+  - id: snd_boot
+    file: "sounds/boot.wav"
+
+  - id: snd_wake
+    file: "sounds/wake.wav"
+
+  - id: snd_thinking
+    file: "sounds/thinking.wav"
+
+  - id: snd_notify
+    file: "sounds/notify.wav"
+
+  - id: snd_pause
+    file: "sounds/pause.wav"
+
+  - id: snd_error
+    file: "sounds/error.wav"
+
+  - id: snd_success
+    file: "sounds/success.wav"
+
+  - id: snd_turn_on
+    file: "sounds/turn_on.wav"
+
+  - id: snd_turn_off
+    file: "sounds/turn_off.wav"
+
+  - id: snd_red_alert
+    file: "sounds/red_alert.wav"
 
 # globals - Application Variablen
 globals:
@@ -1490,6 +1495,10 @@ script:
     then:
     - logger.log: "on_media_player_play"
     # MP spielt Media → Play
+    # - media_player.play_media:
+    #     id: hw_media_player
+    #     media_url: "audio-file://pause"
+    #     announcement: True
     - script.execute:
         id: set_content_mode
         mode: CONTENT_PLAY
@@ -1497,13 +1506,17 @@ script:
     then:
     - logger.log: "on_media_player_pause"
     # MP pausiert Media → Play
+    # - media_player.play_media:
+    #     id: hw_media_player
+    #     media_url: "audio-file://snd_pause"
+    #     announcement: True
     - script.execute:
         id: set_content_mode
         mode: CONTENT_PAUSE
   - id: on_media_player_idle
     then:
     - logger.log: "on_media_player_idle"
-    # MP hat keine Media → Idele
+    # MP hat keine Media → Idle
     - script.execute:
         id: set_content_mode
         mode: CONTENT_IDLE
@@ -1545,15 +1558,27 @@ script:
   - id: on_voice_assistant_client_connect
     then:
     - logger.log: "on_voice_assistant_client_connect"
+    - media_player.play_media:
+        id: hw_media_player
+        media_url: "audio-file://snd_turn_on"
+        announcement: True
     - micro_wake_word.start:
   - id: on_voice_assistant_client_disconnect
     then:
     - logger.log: "on_voice_assistant_client_disconnect"
+    - media_player.play_media:
+        id: hw_media_player
+        media_url: "audio-file://snd_turn_off"
+        announcement: True
     - micro_wake_word.stop:
   - id: on_voice_assistant_listening
     then:
     - logger.log: "on_voice_assistant_Listening"
     # VA hört zu → Listening
+    # - media_player.play_media:
+    #     id: hw_media_player
+    #     media_url: "audio-file://snd_wake"
+    #     announcement: True
     - script.execute:
         id: set_content_mode
         mode: CONTENT_LISTEN
@@ -1570,9 +1595,20 @@ script:
         format: "on_voice_assistant_stt_end: %s"
         args: [command.c_str()]
     # Spracheingabe beendet → Thinking
+    # - script.execute:
+    #     id: set_content_mode
+    #     mode: CONTENT_THINK
+  - id: on_voice_assistant_stt_vad_start
+    then:
+    - logger.log: "voice_assistant on_vad_start"
+  - id: on_voice_assistant_stt_vad_end
+    then:
+    - logger.log: "voice_assistant on_stt_vad_end"
     - script.execute:
         id: set_content_mode
         mode: CONTENT_THINK
+
+
   - id: on_voice_assistant_tts_start
     parameters:
       announce : string
@@ -1589,15 +1625,19 @@ script:
     - logger.log:
         format: "on_voice_assistant_tts_end: %s"
         args: [url.c_str()]
-    - script.execute:
-        id: set_content_mode
-        mode: CONTENT_IDLE
+    # - script.execute:
+    #     id: set_content_mode
+    #     mode: CONTENT_ANNOUNCE
   - id: on_voice_assistant_idle
     then:
     - logger.log: "on_voice_assistant_idle"
   - id: on_voice_assistant_end
     then:
     - logger.log: "on_voice_assistant_end"
+    # - media_player.play_media:
+    #     id: hw_media_player
+    #     media_url: "audio-file://snd_success"
+    #     announcement: True
     - micro_wake_word.start:
   - id: on_voice_assistant_error
     parameters:
@@ -1608,6 +1648,10 @@ script:
         format: "on_voice_assistant_error %d %s"
         args: [code.c_str(), error.c_str()]
     # Fehler → erst zurück zu Content Idle , dann zu Overlay Error, der geht dann zurück auf Idle
+    - media_player.play_media:
+        id: hw_media_player
+        media_url: "audio-file://snd_error"
+        announcement: True
     - script.execute:
         id: set_content_mode
         mode: CONTENT_IDLE
@@ -1623,6 +1667,12 @@ script:
       wake_word : string
     then:
     - logger.log: "on_micro_wake_word_detected"
+    # VA hört zu → Listening
+    - media_player.play_media:
+        id: hw_media_player
+        media_url: "audio-file://snd_wake"
+        announcement: False
+    - delay: 0.2s
     - voice_assistant.start:
         wake_word: !lambda return wake_word;
 
