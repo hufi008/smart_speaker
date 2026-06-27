@@ -196,6 +196,7 @@ light:
     restore_mode: RESTORE_DEFAULT_ON
     name: "Status"
     effects:
+      # User Effects for Light
       - addressable_rainbow:
           name: "Rainbow"
       - addressable_scan:
@@ -390,8 +391,6 @@ light:
               it[i] = Color(y, 0, 0);  // Rot
             }
 
-
-
       # Overlay Mode Effects
       - addressable_lambda:
           name: "Effect OVERLAY_NONE"
@@ -423,9 +422,9 @@ light:
 
               float fade = 0.2f;
 
-              if (target_index < index) {
+              if (target_index <= index) {
                 fade = 1.0f;  // voll an
-              } else if (target_index <= index + 1) {
+              } else if (target_index < index + 1) {
                 fade = index - target_index;  // ÜbergangsLED
               }
 
@@ -534,6 +533,15 @@ text_sensor:
     # scan_results:
     #   name: "Scan"
     #   icon: "mdi:wifi"
+  - platform: homeassistant
+    id: aktueller_titel
+    entity_id: media_player.audio_player # Die Entität deines ESP-Players in HA
+    attribute: media_title               # Holt den Songtitel
+
+  - platform: homeassistant
+    id: aktueller_interpret
+    entity_id: media_player.audio_player
+    attribute: media_artist              # Holt den Interpreten
 
 # Buttons TTP223
 binary_sensor:
@@ -960,62 +968,70 @@ display:
         }
       }
 
-# audio_file:
-#   - id: snd_boot
-#     file: "sounds/boot.wav"
+audio_file:
+  - id: snd_boot
+    file: "sounds/boot.wav"
 
-#   - id: snd_wake
-#     file: "sounds/wake.wav"
+  - id: snd_wake
+    file: "sounds/wake.wav"
 
-#   - id: snd_thinking
-#     file: "sounds/thinking.wav"
+  # - id: snd_thinking
+  #   file: "sounds/thinking.wav"
 
-#   - id: snd_notify
-#     file: "sounds/notify.wav"
+  # - id: snd_notify
+  #   file: "sounds/notify.wav"
 
-#   - id: snd_pause
-#     file: "sounds/pause.wav"
+  # - id: snd_pause
+  #   file: "sounds/pause.wav"
 
-#   - id: snd_error
-#     file: "sounds/error.wav"
+  # - id: snd_error
+  #   file: "sounds/error.wav"
 
-#   - id: snd_success
-#     file: "sounds/success.wav"
+  # - id: snd_success
+  #   file: "sounds/success.wav"
 
-#   - id: snd_turn_on
-#     file: "sounds/turn_on.wav"
+  # - id: snd_turn_on
+  #   file: "sounds/turn_on.wav"
 
-#   - id: snd_turn_off
-#     file: "sounds/turn_off.wav"
+  # - id: snd_turn_off
+  #   file: "sounds/turn_off.wav"
 
-#   - id: snd_red_alert
-#     file: "sounds/red_alert.wav"
+  # - id: snd_red_alert
+  #   file: "sounds/red_alert.wav"
 
-# media_source:
-#   - platform: audio_file
-#     id: file_source
+media_source:
+  - platform: audio_http
+    id: media_file_source
+  - platform: audio_file
+    id: media_local_file_source     # NEU: Für die normale Musik-Pipeline
+  - platform: audio_file
+    id: announcement_file_source    # Bleibt für die Durchsagen-Pipeline
 
 #################################################################################
 # Magic
 #################################################################################
 
 media_player:
-  - platform: speaker
+  - platform: speaker_source
     id: hw_media_player
     name: "Audio Player"
 
     media_pipeline:
-      speaker: media_source_speaker
+      speaker: media_mixing_input
       sample_rate: 48000
-      num_channels: 2      
+      num_channels: 2
+      sources:
+        - media_file_source
+        - media_local_file_source
+
 
     announcement_pipeline:
-      speaker: announcement_source_speaker
+      speaker: announcement_mixing_input
       sample_rate: 16000
       num_channels: 1
+      sources:
+        - announcement_file_source
 
-    buffer_size: 1000000
-    task_stack_in_psram: True
     volume_increment: 5%
     volume_initial: 50%
     volume_min: 0%
@@ -1394,7 +1410,6 @@ script:
           id(error_message) = msg;
           id(set_overlay_mode).execute(OVERLAY_ERROR);
       - delay: 5s
-
       - lambda: |-
           id(set_overlay_mode).execute(OVERLAY_NONE);
 
@@ -1409,11 +1424,12 @@ script:
           id: set_content_mode
           mode: CONTENT_BOOT
   - id: on_esphome_boot_minus100
-    then:
+    then: 
       - logger.log: "on_esphome_boot_minus100"
-      # - media_player.play_media: 
-      #     id: hw_media_player
-      #     media_url: snd_boot
+      - media_player.play_media:
+          id: hw_media_player
+          media_url: "audio-file://snd_boot"
+
 # wifi
   - id: on_wifi_connect
     then:
@@ -1646,3 +1662,7 @@ script:
   - id: on_btn_4_long_click
     then:
       - logger.log: "on_btn4_long_click"
+      - media_player.play_media:
+          id: hw_media_player
+          media_url: "audio-file://snd_wake"
+
