@@ -435,22 +435,12 @@ light:
               return;
             }
 
-            float vol = id(hw_media_player).volume;
-            float index = vol * it.size();
+            float index = id(hw_media_player).volume * it.size();
 
             for (int i = 0; i < it.size(); i++) {
-              // LEDs rückwärts (rechts → links)
-              int target_index = it.size() - i;
-
-              float fade = 0.2f;
-
-              if (target_index <= index) {
-                fade = 1.0f;  // voll an
-              } else if (target_index < index + 1) {
-                fade = index - target_index;  // ÜbergangsLED
-              }
-
-              it[i] = esphome::Color(0, int(127*fade), int(255*fade));
+              float fade = std::clamp(index - i, 0.2f, 1.0f);
+              // falschrum eingebaut
+              it[it.size()-1-i] = esphome::Color(0, int(127*fade), int(255*fade));
             }
       # Effect Mode 2 - Error Overlay
       - addressable_lambda:
