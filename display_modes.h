@@ -87,7 +87,7 @@ static const char* overlay_mode_names[] = {
 inline const char* overlay_mode_to_string(OverlayMode mode) {
   int idx = mode;
   if (idx < OVERLAY_NONE || idx > OVERLAY_ERROR) return "UNKNOWN";
-  return OVERLAY_mode_names[idx];
+  return overlay_mode_names[idx];
 }
 
 inline const char* overlay_mode_to_string(int idx) {

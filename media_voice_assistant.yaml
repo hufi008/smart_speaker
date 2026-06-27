@@ -184,7 +184,9 @@ speaker:
     bits_per_sample: 16bit
     sample_rate: 48000
     channel: stereo
-    timeout: 50ms
+    # timeout: 50ms
+    buffer_duration: 100ms
+      
 
   # B) Der digitale Audio-Mixer
   - platform: mixer
@@ -1029,7 +1031,7 @@ media_player:
     name: "Audio Player"
 
     media_pipeline:
-      speaker: media_mixing_input
+      speaker: media_source_speaker
       sample_rate: 48000
       num_channels: 2
       sources:
@@ -1037,7 +1039,7 @@ media_player:
 
 
     announcement_pipeline:
-      speaker: announcement_mixing_input
+      speaker: announcement_source_speaker
       sample_rate: 16000
       num_channels: 1
       sources:
