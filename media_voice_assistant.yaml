@@ -2,6 +2,7 @@ substitutions:
   name: "esphome-web-f407a0"
   friendly_name: "Smart Speaker 2"
   version: "0.2.2"
+  media_player_entity_id: "media_player.smart_speaker_2_audio_player"
 
   # Pin-Belegung
   # Amp Max98357
@@ -218,6 +219,8 @@ light:
     num_leds: ${led_count}
     rgb_order: GRB
     chipset: ws2812
+    rmt_symbols: 48
+    max_refresh_rate: 50ms      
     restore_mode: RESTORE_DEFAULT_ON
     name: "Status"
     effects:
@@ -391,7 +394,7 @@ light:
       # Effect CONTENT_PLAY
       - addressable_rainbow:
           name: "Effect CONTENT_PLAY"
-          speed: 4
+          speed: 16
           width: 12
       # Effect CONTENT_PAUSE
       - addressable_lambda:
@@ -548,15 +551,27 @@ text_sensor:
     # scan_results:
     #   name: "Scan"
     #   icon: "mdi:wifi"
+  # Titel des aktuellen Tracks
   - platform: homeassistant
-    id: aktueller_titel
-    entity_id: media_player.audio_player # Die Entität deines ESP-Players in HA
-    attribute: media_title               # Holt den Songtitel
+    id: media_title
+    entity_id: ${media_player_entity_id}
+    attribute: media_title
+    on_value:
+      then:
+        - logger.log:
+            format: "media_title='%s'"
+            args: [ id(media_title).state.c_str() ]
 
+  # Interpret
   - platform: homeassistant
-    id: aktueller_interpret
-    entity_id: media_player.audio_player
-    attribute: media_artist              # Holt den Interpreten
+    id: media_artist
+    entity_id: ${media_player_entity_id}
+    attribute: media_artist
+    on_value:
+      then:
+        - logger.log:
+            format: "media_artist='%s'"
+            args: [ id(media_artist).state.c_str() ]
 
 # Buttons TTP223
 binary_sensor:
@@ -767,27 +782,27 @@ font:
   - file: "gfonts://Roboto"
     id: font_small
     size: 9
+    glyphs: ["äöüÄÖÜß°"]
     glyphsets:
-      - GF_Latin_Core
-      - GF_Latin_Plus
+      - GF_Latin_Kernel
   - file: "gfonts://Roboto"
     id: font_medium
     size: 14
+    glyphs: ["äöüÄÖÜß°"]
     glyphsets:
-      - GF_Latin_Core
-      - GF_Latin_Plus
+      - GF_Latin_Kernel
   - file: "gfonts://Roboto"
     id: font_large
     size: 22
+    glyphs: ["äöüÄÖÜß°"]
     glyphsets:
-      - GF_Latin_Core
-      - GF_Latin_Plus
+      - GF_Latin_Kernel
   - file: "gfonts://Roboto"
     id: font_huge
     size: 28
+    glyphs: ["äöüÄÖÜß°"]
     glyphsets:
-      - GF_Latin_Core
-      - GF_Latin_Plus
+      - GF_Latin_Kernel
 
 # Display ssd1306
 display:
@@ -958,7 +973,14 @@ display:
         // 5: PLAY
         // -------------------------
         case CONTENT_PLAY: {
-          it.image(xi, yi, id(icon_play));
+          //it.image(xi, yi, id(icon_play));
+          // Titel
+          it.printf(xc+16, y1, id(font_medium), TextAlign::CENTER,
+                    "%s", id(media_title).state.c_str());
+
+          // Interpret
+          it.printf(xc+16, y2, id(font_medium), TextAlign::CENTER,
+                    "%s", id(media_artist).state.c_str());
           break;
         }
 
@@ -1007,7 +1029,7 @@ media_player:
     media_pipeline:
       speaker: media_source_speaker
       sample_rate: 48000
-      num_channels: 2
+      num_channels: 2      
       sources:
         - media_file_source
 
@@ -1030,9 +1052,28 @@ media_player:
           condition:
             lambda: 'return id(content_mode) > CONTENT_BOOT;'
           then:
+            - logger.log: "Ducking enabled"
+            - mixer_speaker.apply_ducking:
+                id: media_mixing_input
+                decibel_reduction: 20
+                duration: 0.3s
             - script.execute: on_media_player_announcement
     on_play:
-      - script.execute: on_media_player_play
+      then:
+        - mixer_speaker.apply_ducking:
+            id: media_mixing_input
+            decibel_reduction: 0
+            duration: 0.3s
+        # Warten, bis der Speaker wirklich frei ist
+        - wait_until:
+            condition:
+              lambda: 'return !id(hw_speaker).is_running();'
+
+        # Kleiner Cooldown, damit der I2S-Bus garantiert frei ist
+        - delay: 50ms
+
+        - logger.log: "MediaPlayer starting after wait_until + delay"
+        - script.execute: on_media_player_play
     on_pause:
       - script.execute: on_media_player_pause
     on_idle:
