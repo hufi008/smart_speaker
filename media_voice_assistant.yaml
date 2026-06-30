@@ -186,7 +186,6 @@ speaker:
     bits_per_sample: 16bit
     sample_rate: 48000
     channel: stereo
-    # timeout: 50ms
     buffer_duration: 100ms
       
 
@@ -210,7 +209,7 @@ speaker:
   - platform: resampler
     id: announcement_source_speaker
     output_speaker: announcement_mixing_input
-
+    
 # LED Strip WS2812
 light:
   - platform: esp32_rmt_led_strip
@@ -857,7 +856,8 @@ display:
       // 1b. BLAUER CONTENT-BEREICH (Pixel 16–63)
       // -------------------------------------------------------
       // Trennlinie zwischen GELB (oben) und BLAU (unten)
-      it.rectangle(0, 16, 128, 48);
+      it.line(0,15,127,15);
+      //it.rectangle(0, 16, 128, 48);
 
       // Positionen
       constexpr int xc = 64; // Mitte
@@ -975,11 +975,11 @@ display:
         case CONTENT_PLAY: {
           //it.image(xi, yi, id(icon_play));
           // Titel
-          it.printf(xc+16, y1, id(font_medium), TextAlign::CENTER,
+          it.printf(xc, y1, id(font_medium), TextAlign::CENTER,
                     "%s", id(media_title).state.c_str());
 
           // Interpret
-          it.printf(xc+16, y2, id(font_medium), TextAlign::CENTER,
+          it.printf(xc, y2, id(font_medium), TextAlign::CENTER,
                     "%s", id(media_artist).state.c_str());
           break;
         }
@@ -1048,6 +1048,9 @@ media_player:
     volume_max: 100%
 
     on_announcement:
+      - logger.log:
+          format: "on_announcement: ui_sound_active=%s"
+          args: [ 'id(ui_sound_active) ? "true" : "false"' ]      
       - if:
           condition:
             lambda: 'return id(content_mode) > CONTENT_BOOT;'
@@ -1057,7 +1060,14 @@ media_player:
                 id: media_mixing_input
                 decibel_reduction: 20
                 duration: 0.3s
-            - script.execute: on_media_player_announcement
+            - if:
+                condition: 
+                  lambda: 'return !id(ui_sound_active);'
+                then:                      
+                  - script.execute: on_media_player_announcement
+                else:
+                  - script.execute: on_media_player_sound
+
     on_play:
       then:
         - mixer_speaker.apply_ducking:
@@ -1081,7 +1091,15 @@ media_player:
           condition:
             lambda: 'return id(content_mode) > CONTENT_BOOT;'
           then:
-            - script.execute: on_media_player_idle
+            - if:
+                condition:
+                  lambda: 'return id(ui_sound_active);'
+                then:
+                  - logger.log: "play_ui_sound OFF"
+                  - lambda: |-
+                      id(ui_sound_active) = false;
+                else:
+                  - script.execute: on_media_player_idle
     on_turn_on:
       - script.execute: on_media_player_turn_on
     on_turn_off:
@@ -1305,6 +1323,9 @@ globals:
     type: bool
     restore_value: False
     initial_value: "true"
+  - id: ui_sound_active
+    type: bool
+    initial_value: "false"
   - id: content_mode
     type: int
     restore_value: False
@@ -1398,13 +1419,29 @@ select:
 
 # Zentrale Stelle für Systemreaktionen
 script:
+  - id: play_ui_sound
+    parameters:
+      sound_name: string
+    then:
+      - logger.log: "play_ui_sound ON"
+      - lambda: |-
+          id(ui_sound_active) = true;
+      - media_player.enqueue:
+          id: hw_media_player
+          media_url: !lambda |-
+            return "audio-file://" + sound_name;
+          announcement: True
+      # - logger.log: "play_ui_sound OFF"
+      # - lambda: |-
+      #     id(ui_sound_active) = false;
+
   - id: set_content_mode
     parameters:
       mode: int
     then:
       - logger.log:
-          format: "script set_content_mode %d"
-          args: [mode]
+          format: "script set_content_mode %s"
+          args: [ "content_mode_to_string(mode)" ]
       - lambda: |-
           // in der Bootphase wird nix geschaltet
           if (id(is_booting)) return;
@@ -1500,10 +1537,13 @@ script:
             media_player.is_idle: hw_media_player
       
       - logger.log: "Media Player ist bereit! Spiele Boot-Sound."
-      - media_player.play_media:
-          id: hw_media_player
-          media_url: "audio-file://snd_boot"
-          announcement: True
+      - script.execute:
+          id: play_ui_sound
+          sound_name: "snd_wake"
+      # - media_player.play_media:
+      #     id: hw_media_player
+      #     media_url: "audio-file://snd_boot"
+      #     announcement: True
 # wifi
   - id: on_wifi_connect
     then:
@@ -1525,197 +1565,221 @@ script:
       - logger.log: "on_time_time_sync"
 
 # media_player
+  - id: on_media_player_sound
+    then:
+      - logger.log: "on_media_player_sound"
+
   - id: on_media_player_announcement
     then:
-    - logger.log: "on_media_player_announcement"
-    # VA antwortet → Announce
-    - script.execute:
-        id: set_content_mode
-        mode: CONTENT_ANNOUNCE
+      - logger.log: "on_media_player_announcement"
+      # VA antwortet → Announce
+      - script.execute:
+          id: set_content_mode
+          mode: CONTENT_ANNOUNCE
+
   - id: on_media_player_play
     then:
-    - logger.log: "on_media_player_play"
-    # MP spielt Media → Play
-    # - media_player.play_media:
-    #     id: hw_media_player
-    #     media_url: "audio-file://pause"
-    #     announcement: True
-    - script.execute:
-        id: set_content_mode
-        mode: CONTENT_PLAY
+      - logger.log: "on_media_player_play"
+      # MP spielt Media → Play
+      - script.execute:
+          id: play_ui_sound
+          sound_name: "snd_play"
+      - micro_wake_word.stop:
+      - script.execute:
+          id: set_content_mode
+          mode: CONTENT_PLAY
+
   - id: on_media_player_pause
     then:
-    - logger.log: "on_media_player_pause"
-    # MP pausiert Media → Play
-    # - media_player.play_media:
-    #     id: hw_media_player
-    #     media_url: "audio-file://snd_pause"
-    #     announcement: True
-    - script.execute:
-        id: set_content_mode
-        mode: CONTENT_PAUSE
+      - logger.log: "on_media_player_pause"
+      # MP pausiert Media → Pause
+      - script.execute:
+          id: play_ui_sound
+          sound_name: "snd_pause"
+      - script.execute:
+          id: set_content_mode
+          mode: CONTENT_PAUSE
+
   - id: on_media_player_idle
     then:
-    - logger.log: "on_media_player_idle"
-    # MP hat keine Media → Idle
-    - script.execute:
-        id: set_content_mode
-        mode: CONTENT_IDLE
+      - logger.log: "on_media_player_idle"
+      - delay: 500ms
+      - if:
+          condition:
+            not:
+              micro_wake_word.is_running:
+          then:
+            - micro_wake_word.start:
+      # MP hat keine Media → Idle
+      - script.execute:
+          id: set_content_mode
+          mode: CONTENT_IDLE
+
   - id: on_media_player_turn_on
     then:
-    - logger.log: "on_media_player_turn_on"
-    # MP an → Idele
-    - script.execute:
-        id: set_content_mode
-        mode: CONTENT_IDLE
+      - logger.log: "on_media_player_turn_on"
+      # MP an → Idle
+      - script.execute:
+          id: set_content_mode
+          mode: CONTENT_IDLE
+
   - id: on_media_player_turn_off
     then:
-    - logger.log: "on_media_player_turn_off"
-    # MP aus → Idle
-    - script.execute:
-        id: set_content_mode
-        mode: CONTENT_IDLE
+      - logger.log: "on_media_player_turn_off"
+      # MP aus → Idle
+      - script.execute:
+          id: set_content_mode
+          mode: CONTENT_IDLE
+
   - id: on_media_player_mute
     then:
-    - logger.log: "on_media_player_mute"
-    - script.execute:
-        id: show_volume_overlay
+      - logger.log: "on_media_player_mute"
+      - script.execute:
+          id: show_volume_overlay
+
   - id: on_media_player_unmute
     then:
-    - logger.log: "on_media_player_unmute"
-    - script.execute:
-        id: show_volume_overlay
+      - logger.log: "on_media_player_unmute"
+      - script.execute:
+          id: show_volume_overlay
+
   - id: on_media_player_volume
     then:
-    - logger.log: "on_media_player_volume"
-    - script.execute: show_volume_overlay
+      - logger.log: "on_media_player_volume"
+      - script.execute:
+          id: show_volume_overlay
+
   - id: on_media_player_state
     then:
-    - logger.log:
-        format: "on_media_player_state: %s"
-        args: [ 'media_player::media_player_state_to_string(id(hw_media_player).state)' ]
+      - logger.log:
+          format: "on_media_player_state: %s"
+          args: [ 'media_player::media_player_state_to_string(id(hw_media_player).state)' ]
+
 
 # voice_assistant
   - id: on_voice_assistant_client_connect
     then:
-    - logger.log: "on_voice_assistant_client_connect"
-    - media_player.play_media:
-        id: hw_media_player
-        media_url: "audio-file://snd_turn_on"
-        announcement: True
-    - micro_wake_word.start:
+      - logger.log: "on_voice_assistant_client_connect"
+      - script.execute:
+          id: play_ui_sound
+          sound_name: "snd_turn_on"
+      - micro_wake_word.start:
+
   - id: on_voice_assistant_client_disconnect
     then:
-    - logger.log: "on_voice_assistant_client_disconnect"
-    - media_player.play_media:
-        id: hw_media_player
-        media_url: "audio-file://snd_turn_off"
-        announcement: True
-    - micro_wake_word.stop:
+      - logger.log: "on_voice_assistant_client_disconnect"
+      - script.execute:
+          id: play_ui_sound
+          sound_name: "snd_turn_off"
+      - micro_wake_word.stop:
+
   - id: on_voice_assistant_listening
     then:
-    - logger.log: "on_voice_assistant_Listening"
-    # VA hört zu → Listening
-    # - media_player.play_media:
-    #     id: hw_media_player
-    #     media_url: "audio-file://snd_wake"
-    #     announcement: True
-    - script.execute:
-        id: set_content_mode
-        mode: CONTENT_LISTEN
+      - logger.log: "on_voice_assistant_Listening"
+      # - script.execute:
+      #     id: play_ui_sound
+      #     sound_name: "snd_wake"
+      - script.execute:
+          id: set_content_mode
+          mode: CONTENT_LISTEN
+
   - id: on_voice_assistant_start
     then:
-    - logger.log: "on_voice_assistant_start"
+      - logger.log: "on_voice_assistant_start"
+      - lambda: |-          
+          id(command_message) = "";
+          id(announce_message) = "";
+          id(error_message) = "";
+
+
   - id: on_voice_assistant_stt_end
     parameters:
-      command : string
+      command: string
     then:
-    - lambda:
-        id(command_message) = "Q:"+command;
-    - logger.log:
-        format: "on_voice_assistant_stt_end: %s"
-        args: [command.c_str()]
-    # Spracheingabe beendet → Thinking
-    # - script.execute:
-    #     id: set_content_mode
-    #     mode: CONTENT_THINK
+      - lambda: |-
+          id(command_message) = "Q:" + command;
+      - logger.log:
+          format: "on_voice_assistant_stt_end: %s"
+          args: [command.c_str()]
+
   - id: on_voice_assistant_stt_vad_start
     then:
-    - logger.log: "voice_assistant on_vad_start"
+      - logger.log: "voice_assistant on_vad_start"
+
   - id: on_voice_assistant_stt_vad_end
     then:
-    - logger.log: "voice_assistant on_stt_vad_end"
-    - script.execute:
-        id: set_content_mode
-        mode: CONTENT_THINK
-
+      - logger.log: "voice_assistant on_stt_vad_end"
+      - script.execute:
+          id: set_content_mode
+          mode: CONTENT_THINK
 
   - id: on_voice_assistant_tts_start
     parameters:
-      announce : string
+      announce: string
     then:
-    - lambda:
-        id(announce_message) = "A:"+announce;
-    - logger.log:
-        format: "on_voice_assistant_tts_start: %s"
-        args: [announce.c_str()]
+      - logger.log:
+          format: "on_voice_assistant_tts_start: %s"
+          args: [announce.c_str()]
+      - micro_wake_word.stop:
+      - lambda: |-
+          id(announce_message) = "A:" + announce;
+
   - id: on_voice_assistant_tts_end
     parameters:
-      url : string
+      url: string
     then:
-    - logger.log:
-        format: "on_voice_assistant_tts_end: %s"
-        args: [url.c_str()]
-    # - script.execute:
-    #     id: set_content_mode
-    #     mode: CONTENT_ANNOUNCE
+      - logger.log:
+          format: "on_voice_assistant_tts_end: %s"
+          args: [url.c_str()]
+      - delay: 1s
+      - micro_wake_word.start:
+
   - id: on_voice_assistant_idle
     then:
-    - logger.log: "on_voice_assistant_idle"
+      - logger.log: "on_voice_assistant_idle"
+
   - id: on_voice_assistant_end
     then:
-    - logger.log: "on_voice_assistant_end"
-    # - media_player.play_media:
-    #     id: hw_media_player
-    #     media_url: "audio-file://snd_success"
-    #     announcement: True
-    - micro_wake_word.start:
+      - logger.log: "on_voice_assistant_end"
+      - script.execute:
+          id: play_ui_sound
+          sound_name: "snd_success"
+      - micro_wake_word.start:
+
   - id: on_voice_assistant_error
     parameters:
-      code : string
-      error : string
+      code: string
+      error: string
     then:
-    - logger.log:
-        format: "on_voice_assistant_error %d %s"
-        args: [code.c_str(), error.c_str()]
-    # Fehler → erst zurück zu Content Idle , dann zu Overlay Error, der geht dann zurück auf Idle
-    - media_player.play_media:
-        id: hw_media_player
-        media_url: "audio-file://snd_error"
-        announcement: True
-    - script.execute:
-        id: set_content_mode
-        mode: CONTENT_IDLE
-    - script.execute:
-        id: show_error_overlay
-        msg: !lambda |
-          return code + ": " + error;
-    - micro_wake_word.start:
+      - logger.log:
+          format: "on_voice_assistant_error %d %s"
+          args: [code.c_str(), error.c_str()]
+      - media_player.play_media:
+          id: hw_media_player
+          media_url: "audio-file://snd_error"
+          announcement: True
+      - script.execute:
+          id: set_content_mode
+          mode: CONTENT_IDLE
+      - script.execute:
+          id: show_error_overlay
+          msg: !lambda |-
+            return code + ": " + error;
+      - micro_wake_word.start:
 
 # micro_wake_word
   - id: on_micro_wake_word_detected
     parameters:
       wake_word : string
     then:
-    - logger.log: "on_micro_wake_word_detected"
-    # VA hört zu → Listening
-    - media_player.play_media:
-        id: hw_media_player
-        media_url: "audio-file://snd_wake"
-        announcement: False
-    - delay: 0.2s
-    - voice_assistant.start:
-        wake_word: !lambda return wake_word;
+      - logger.log: "on_micro_wake_word_detected"
+      # VA hört zu → Listening
+      # - script.execute:
+      #     id: play_ui_sound
+      #     sound_name: "snd_wake"
+      # - delay: 0.2s
+      - voice_assistant.start:
+          wake_word: !lambda return wake_word;
 
 # binary_sensor:
 # Button Up - Play/Pause - - Stop
@@ -1776,8 +1840,10 @@ script:
   - id: on_btn_4_long_click
     then:
       - logger.log: "on_btn4_long_click"
-      - media_player.play_media:
-          id: hw_media_player
-          media_url: "audio-file://snd_wake"
-          announcement: True
-
+      - script.execute:
+          id: play_ui_sound
+          sound_name: "snd_wake"
+      # - media_player.play_media:
+      #     id: hw_media_player
+      #     media_url: "audio-file://snd_wake"
+      #     announcement: True
