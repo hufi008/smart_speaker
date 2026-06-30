@@ -371,25 +371,6 @@ light:
               int b = max(0, 150 - d * 40);
               it[i] = Color(b, 0, b);
             }
-      # Effect CONTENT_ANNOUNCE
-      - addressable_lambda:
-          name: "Effect CONTENT_ANNOUNCE"
-          update_interval: 20ms
-          lambda: |-
-            const int count = ${led_count};
-
-            // Position des Scans (läuft von 0 bis count-1)
-            int pos = (millis() / 40) % count;
-
-            for (int i = 0; i < count; i++) {
-              // Abstand zur Scan-Position
-              int d = abs(i - pos);
-
-              // Helligkeit abhängig vom Abstand (weicher Abfall)
-              int b = max(0, 180 - d * 60);  // 180 = hell, 60 = Abfall pro LED
-
-              it[i] = esphome::Color(b+75, b, b+75);  // Cyan-Blau
-            }
       # Effect CONTENT_PLAY
       - addressable_rainbow:
           name: "Effect CONTENT_PLAY"
@@ -426,7 +407,7 @@ light:
             for (int i = 0; i < it.size(); i++) {
               it[i] = esphome::Color(0,0,0);
             }
-      # Effect Mode 1 - Volume Overlay
+      # Effect OVERLAY_VOLUME
       - addressable_lambda:
           name: "Effect OVERLAY_VOLUME"
           update_interval: 20ms
@@ -447,7 +428,7 @@ light:
               // falschrum eingebaut
               it[it.size()-1-i] = esphome::Color(0, int(127*fade), int(255*fade));
             }
-      # Effect Mode 2 - Error Overlay
+      # Effect OVERLAY_ERROR
       - addressable_lambda:
           name: "Effect OVERLAY_ERROR"
           update_interval: 40ms
@@ -456,6 +437,25 @@ light:
             float b = (sin(t * 2 * 3.14159f) + 1) / 2;  // 0–1
             for (int i = 0; i < it.size(); i++) {
               it[i] = Color(int(200 * b), 0, 0);
+            }
+      # Effect OVERLAY_ANNOUNCE
+      - addressable_lambda:
+          name: "Effect OVERLAY_ANNOUNCE"
+          update_interval: 20ms
+          lambda: |-
+            const int count = ${led_count};
+
+            // Position des Scans (läuft von 0 bis count-1)
+            int pos = (millis() / 40) % count;
+
+            for (int i = 0; i < count; i++) {
+              // Abstand zur Scan-Position
+              int d = abs(i - pos);
+
+              // Helligkeit abhängig vom Abstand (weicher Abfall)
+              int b = max(0, 180 - d * 60);  // 180 = hell, 60 = Abfall pro LED
+
+              it[i] = esphome::Color(b+75, b, b+75);  // Cyan-Blau
             }
             
 # I2C Bus
@@ -885,10 +885,10 @@ display:
             it.image(xi, yi, id(icon_volume));
 
             if (id(hw_media_player).is_muted()) {
-              it.print(xc+16, yc, id(font_large), TextAlign::CENTER, "MUTE");
+              it.print(x0, yc, id(font_large), TextAlign::CENTER, "MUTE");
             } else {
               float vol = id(hw_media_player).volume;          
-              it.printf(xc+16, yc, id(font_large), TextAlign::CENTER, "%.0f%%", vol * 100.0f);
+              it.printf(x0, yc, id(font_large), TextAlign::CENTER, "%.0f%%", vol * 100.0f);
               it.filled_rectangle(40, 50, vol * 80, 14);
             }
             return;
@@ -900,7 +900,43 @@ display:
           case 2: {
             it.image(xi, yi, id(icon_error));
 
-            it.printf(xc, yc, id(font_medium), TextAlign::CENTER, "%s", id(error_message).c_str());
+            // Text umbrechen (max 18 Zeichen pro Zeile)
+            auto lines = wrap_text(id(error_message), 18);
+
+            // Font-Höhe dynamisch abfragen
+            int line_height = id(font_medium).get_height();
+
+            // Vertikal zentrieren
+            int total_height = lines.size() * line_height;
+            int y = yc - total_height / 2;
+
+            // Rendern
+            for (auto &line : lines) {
+                it.printf(x0, y, id(font_medium), TextAlign::CENTER, "%s", line.c_str());
+                y += line_height;
+            }
+            return;
+          }
+
+          // -------------------------
+          // 3: ANNOUNCE
+          // -------------------------
+          case OVERLAY_ANNOUNCE: {
+            it.image(xi, yi, id(icon_announce));
+
+            auto lines = wrap_text(id(announce_message), 14);  // max 14 Zeichen pro Zeile
+
+            int line_height = id(font_medium).get_height();
+            int total_height = lines.size() * line_height;
+            int y = yc - total_height / 2;
+
+            for (auto &line : lines) {
+                it.printf(x0, y, id(font_medium), TextAlign::CENTER, "%s", line.c_str());
+                y += line_height;
+            }            
+
+            //it.printf(x0, yc, id(font_medium), TextAlign::CENTER, "%s", id(announce_message).c_str());
+            
             return;
           }
 
@@ -954,38 +990,72 @@ display:
         // 3: THINK
         // -------------------------
         case CONTENT_THINK: {
-          it.print(x0, y1, id(font_medium), TextAlign::CENTER, id(command_message).c_str());
-          it.image(xi, yi, id(icon_think));          
+          it.image(xi, yi, id(icon_think));
+          
+          // Text umbrechen (max 18 Zeichen pro Zeile)
+          auto lines = wrap_text(id(command_message), 14);
+
+          // Font-Höhe dynamisch abfragen
+          int line_height = id(font_medium).get_height();
+
+          // Vertikal zentrieren
+          int total_height = lines.size() * line_height;
+          int y = yc - total_height / 2;
+
+          // Rendern
+          for (auto &line : lines) {
+              it.printf(x0, y, id(font_medium), TextAlign::CENTER, "%s", line.c_str());
+              y += line_height;
+          }
+
+          // Denk-Animation (dein Kreis)
           it.filled_circle(110, 54, (millis() / 200) % 6 + 2);
+          
           break;
         }
 
         // -------------------------
-        // 4: ANNOUNCE
-        // -------------------------
-        case CONTENT_ANNOUNCE: {
-          it.print(x0, y1, id(font_medium), TextAlign::CENTER, id(announce_message).c_str());
-          it.image(xi, yi, id(icon_announce));
-          break;
-        }
-
-        // -------------------------
-        // 5: PLAY
+        // 4: PLAY
         // -------------------------
         case CONTENT_PLAY: {
-          //it.image(xi, yi, id(icon_play));
-          // Titel
-          it.printf(xc, y1, id(font_medium), TextAlign::CENTER,
-                    "%s", id(media_title).state.c_str());
+          const int display_width = 128;
+          const int speed = 40;      // Scrollgeschwindigkeit
+          const int gap = 40;        // Abstand bevor der Text wieder erscheint
 
-          // Interpret
-          it.printf(xc, y2, id(font_medium), TextAlign::CENTER,
-                    "%s", id(media_artist).state.c_str());
+          // Titel
+          {
+              std::string title = id(media_title).state;
+
+              // Scroll-Offset
+              int scroll = (millis() / speed) % (display_width + gap);
+
+              // Wenn der Text kurz ist → zentrieren
+              if (title.length() < 18) {
+                  it.printf(xc, y1, id(font_medium), TextAlign::CENTER, "%s", title.c_str());
+              } else {
+                  // langer Text → scrollen
+                  it.printf(x0 - scroll, y1, id(font_medium), TextAlign::LEFT, "%s", title.c_str());
+              }
+          }
+
+          // Artist
+          {
+              std::string artist = id(media_artist).state;
+
+              int scroll = (millis() / speed) % (display_width + gap);
+
+              if (artist.length() < 18) {
+                  it.printf(xc, y2, id(font_medium), TextAlign::CENTER, "%s", artist.c_str());
+              } else {
+                  it.printf(x0 - scroll, y2, id(font_medium), TextAlign::LEFT, "%s", artist.c_str());
+              }
+          }
+
           break;
         }
 
         // -------------------------
-        // 6: PAUSE
+        // 5: PAUSE
         // -------------------------
         case CONTENT_PAUSE: {
           it.image(xi, yi, id(icon_pause));
@@ -993,7 +1063,7 @@ display:
         }
 
         // -------------------------
-        // 7: ALARM
+        // 6: ALARM
         // -------------------------
         case CONTENT_ALARM: {
           it.image(xi, yi, id(icon_alarm));
@@ -1048,9 +1118,6 @@ media_player:
     volume_max: 100%
 
     on_announcement:
-      - logger.log:
-          format: "on_announcement: ui_sound_active=%s"
-          args: [ 'id(ui_sound_active) ? "true" : "false"' ]      
       - if:
           condition:
             lambda: 'return id(content_mode) > CONTENT_BOOT;'
@@ -1060,30 +1127,19 @@ media_player:
                 id: media_mixing_input
                 decibel_reduction: 20
                 duration: 0.3s
-            - if:
-                condition: 
-                  lambda: 'return !id(ui_sound_active);'
-                then:                      
-                  - script.execute: on_media_player_announcement
-                else:
-                  - script.execute: on_media_player_sound
+            - script.execute: on_media_player_announcement
 
     on_play:
-      then:
-        - mixer_speaker.apply_ducking:
-            id: media_mixing_input
-            decibel_reduction: 0
-            duration: 0.3s
-        # Warten, bis der Speaker wirklich frei ist
-        - wait_until:
-            condition:
-              lambda: 'return !id(hw_speaker).is_running();'
-
-        # Kleiner Cooldown, damit der I2S-Bus garantiert frei ist
-        - delay: 50ms
-
-        - logger.log: "MediaPlayer starting after wait_until + delay"
-        - script.execute: on_media_player_play
+      - if:
+          condition:
+            lambda: 'return id(content_mode) > CONTENT_BOOT;'
+          then:
+            - logger.log: "Ducking enabled"
+            - mixer_speaker.apply_ducking:
+                id: media_mixing_input
+                decibel_reduction: 0
+                duration: 0.3s
+            - script.execute: on_media_player_play
     on_pause:
       - script.execute: on_media_player_pause
     on_idle:
@@ -1091,15 +1147,7 @@ media_player:
           condition:
             lambda: 'return id(content_mode) > CONTENT_BOOT;'
           then:
-            - if:
-                condition:
-                  lambda: 'return id(ui_sound_active);'
-                then:
-                  - logger.log: "play_ui_sound OFF"
-                  - lambda: |-
-                      id(ui_sound_active) = false;
-                else:
-                  - script.execute: on_media_player_idle
+            - script.execute: on_media_player_idle
     on_turn_on:
       - script.execute: on_media_player_turn_on
     on_turn_off:
@@ -1323,9 +1371,6 @@ globals:
     type: bool
     restore_value: False
     initial_value: "true"
-  - id: ui_sound_active
-    type: bool
-    initial_value: "false"
   - id: content_mode
     type: int
     restore_value: False
@@ -1389,7 +1434,6 @@ select:
       - "IDLE"
       - "LISTEN"
       - "THINK"
-      - "ANNOUNCE"
       - "PLAY"
       - "PAUSE"
       - "ALARM"
@@ -1410,6 +1454,7 @@ select:
       - "NONE"
       - "VOLUME"
       - "ERROR"
+      - "ANNOUNCE"
     set_action:
       - lambda: |-
           // Wandelt den Text (x) in die passende Zahl um
@@ -1423,17 +1468,12 @@ script:
     parameters:
       sound_name: string
     then:
-      - logger.log: "play_ui_sound ON"
-      - lambda: |-
-          id(ui_sound_active) = true;
+      - logger.log: "script play_ui_sound"
       - media_player.enqueue:
           id: hw_media_player
           media_url: !lambda |-
             return "audio-file://" + sound_name;
           announcement: True
-      # - logger.log: "play_ui_sound OFF"
-      # - lambda: |-
-      #     id(ui_sound_active) = false;
 
   - id: set_content_mode
     parameters:
@@ -1465,8 +1505,8 @@ script:
       mode: int
     then:
       - logger.log:
-          format: "script set_overlay_mode %d"
-          args: [mode]
+          format: "script set_overlay_mode %s"
+          args: [ "overlay_mode_to_string(mode)"]
       - lambda: |-
           // in der Bootphase wird nix geschaltet
           if (id(is_booting)) return;
@@ -1515,6 +1555,30 @@ script:
           id(set_overlay_mode).execute(OVERLAY_ERROR);
       - delay: 5s
       - lambda: |-
+          id(set_overlay_mode).execute(OVERLAY_NONE);
+  - id: show_announce_overlay
+    mode: restart
+    then:
+      - logger.log:
+          format: "script show_announce_overlay %s"
+          args: [id(announce_message).c_str()]
+      - lambda: |-
+          // Overlay einschalten
+          id(set_overlay_mode).execute(OVERLAY_ANNOUNCE);
+
+      # Warten bis Announcement wirklich gestartet ist
+      - wait_until:
+          condition:
+            media_player.is_announcing: hw_media_player
+
+      # Warten bis Announcement vorbei ist
+      - wait_until:
+          condition:
+            not:
+              media_player.is_announcing: hw_media_player
+
+      - lambda: |-
+          // Overlay ausschalten
           id(set_overlay_mode).execute(OVERLAY_NONE);
 
 # esphome:
@@ -1574,16 +1638,15 @@ script:
       - logger.log: "on_media_player_announcement"
       # VA antwortet → Announce
       - script.execute:
-          id: set_content_mode
-          mode: CONTENT_ANNOUNCE
+          id: show_announce_overlay
 
   - id: on_media_player_play
     then:
       - logger.log: "on_media_player_play"
       # MP spielt Media → Play
-      - script.execute:
-          id: play_ui_sound
-          sound_name: "snd_play"
+      # - script.execute:
+      #     id: play_ui_sound
+      #     sound_name: "snd_play"
       - micro_wake_word.stop:
       - script.execute:
           id: set_content_mode
@@ -1593,9 +1656,9 @@ script:
     then:
       - logger.log: "on_media_player_pause"
       # MP pausiert Media → Pause
-      - script.execute:
-          id: play_ui_sound
-          sound_name: "snd_pause"
+      # - script.execute:
+      #     id: play_ui_sound
+      #     sound_name: "snd_pause"
       - script.execute:
           id: set_content_mode
           mode: CONTENT_PAUSE
@@ -1701,28 +1764,29 @@ script:
       - logger.log:
           format: "on_voice_assistant_stt_end: %s"
           args: [command.c_str()]
+      - component.update: display_id
 
   - id: on_voice_assistant_stt_vad_start
     then:
       - logger.log: "voice_assistant on_vad_start"
+      - script.execute:
+          id: set_content_mode
+          mode: CONTENT_THINK
 
   - id: on_voice_assistant_stt_vad_end
     then:
       - logger.log: "voice_assistant on_stt_vad_end"
-      - script.execute:
-          id: set_content_mode
-          mode: CONTENT_THINK
 
   - id: on_voice_assistant_tts_start
     parameters:
       announce: string
     then:
+      - lambda: |-
+          id(announce_message) = "A:" + announce;
       - logger.log:
           format: "on_voice_assistant_tts_start: %s"
           args: [announce.c_str()]
       - micro_wake_word.stop:
-      - lambda: |-
-          id(announce_message) = "A:" + announce;
 
   - id: on_voice_assistant_tts_end
     parameters:
@@ -1731,8 +1795,6 @@ script:
       - logger.log:
           format: "on_voice_assistant_tts_end: %s"
           args: [url.c_str()]
-      - delay: 1s
-      - micro_wake_word.start:
 
   - id: on_voice_assistant_idle
     then:
@@ -1744,6 +1806,9 @@ script:
       - script.execute:
           id: play_ui_sound
           sound_name: "snd_success"
+      # - script.execute:
+      #     id: set_content_mode
+      #     mode: CONTENT_IDLE
       - micro_wake_word.start:
 
   - id: on_voice_assistant_error
@@ -1786,6 +1851,9 @@ script:
   - id: on_btn_1_single_click
     then:
       - logger.log: "on_btn1_single_click"
+      - script.execute:
+          id: play_ui_sound
+          sound_name: "snd_pause"
       - media_player.toggle: hw_media_player
   - id: on_btn_1_double_click
     then:
