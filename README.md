@@ -14,3 +14,6 @@ Folgendes ist zu tun, damit man unter Windoof loslegen kann:
 ## Optional
 - zweites Fenster aufmachen
 - ins Home-Verzeichnis wechseln; "esphome logs mein-project.yaml --no-states"
+
+## Noch viel einfacher
+Hab ich aber jetzt erst gefunden, diw Windows App unter [hier](https://desktop.esphome.io/)
