@@ -137,7 +137,13 @@ globals:
   - id: skip_next_announcement
     type: bool
     initial_value: "false"
-
+  - id: mic_peak_left
+    type: 'int32_t'
+    initial_value: '0'
+  - id: mic_peak_right
+    type: 'int32_t'
+    initial_value: '0'
+    
   - id: content_mode
     type: int
     initial_value: "0"    
@@ -230,7 +236,8 @@ button:
     on_press:
       then:
         # Display ausschalten
-        - lambda: 'id(display_id).turn_off();'            
+        - lambda: 'id(display_id).turn_off();'
+        - media_player.mute: media_player_id
         - light.turn_off: ledstrip_id
         - wait_until:
               light.is_off: ledstrip_id
@@ -562,7 +569,20 @@ sensor:
       name: Pressure
       device_class: atmospheric_pressure
       state_class: measurement
-      
+
+  - platform: template
+    name: "Mic Left Peak"
+    id: sensor_mic_left_peak
+    unit_of_measurement: "amp"
+    accuracy_decimals: 0
+    update_interval: never
+  - platform: template
+    name: "Mic Right Peak"
+    id: sensor_mic_right_peak
+    unit_of_measurement: "amp"
+    accuracy_decimals: 0
+    update_interval: never
+    
 text_sensor:
   # Wifi Informationen
   - platform: wifi_info
@@ -817,8 +837,6 @@ display:
       }
 
       auto scroll_marquee = [&](int cx, int cy, int width, display::BaseFont *font, const std::string &text) {
-        const float SPEED = 0.002f; // Kleiner = langsamer, größer = schneller
-      
         // Textbreite messen
         int tx, ty, tw, th;
         it.get_text_bounds(cx, cy, text.c_str(), font, TextAlign::CENTER, &tx, &ty, &tw, &th);
@@ -832,23 +850,53 @@ display:
         it.start_clipping(tx, ty, tx + tw, ty + th);
       
         if (tw2 > w2) {
-            // Text ist zu lang → Sinusförmig um die Mitte schwingen
-            // Berechnung der maximalen Pixel-Auslenkung nach links und rechts
             float max_amplitude = tw2 - w2; 
             
-            // Sinus liefert Werte von -1.0 bis 1.0. Das steuert den Versatz.
-            float offset = sinf(millis() * SPEED) * max_amplitude;
+            // OPTISCHE FEINEINSTELLUNG:
+            const float DURATION_MOVE_MS = 3000.0f; // Zeit für eine Richtung (3 Sek. = sehr entspannt)
+            const float DURATION_PAUSE_MS = 1200.0f; // Standzeit am Rand in Millisekunden
             
-            // Zeichnet den Text sanft schwingend um die Mitte (cx)
+            // Ein kompletter Zyklus (Hinweg + Pause + Rückweg + Pause)
+            float total_cycle_ms = (DURATION_MOVE_MS * 2.0f) + (DURATION_PAUSE_MS * 2.0f);
+            float current_time = fmodf(millis(), total_cycle_ms);
+            
+            float offset = 0.0f;
+            
+            if (current_time < DURATION_PAUSE_MS) {
+                // 1. Pause am linken Rand
+                offset = -max_amplitude;
+            } 
+            else if (current_time < DURATION_PAUSE_MS + DURATION_MOVE_MS) {
+                // 2. Weiche Bewegung von links nach rechts (Ease-In-Out)
+                float t = (current_time - DURATION_PAUSE_MS) / DURATION_MOVE_MS; // Fortschritt 0.0 bis 1.0
+                
+                // Offizielle Smoothstep-Formel: Erzeugt perfekte Beschleunigung und Bremsung
+                float smooth_t = t * t * (3.0f - 2.0f * t); 
+                
+                offset = -max_amplitude + (smooth_t * max_amplitude * 2.0f);
+            } 
+            else if (current_time < (DURATION_PAUSE_MS * 2.0f) + DURATION_MOVE_MS) {
+                // 3. Pause am rechten Rand
+                offset = max_amplitude;
+            } 
+            else {
+                // 4. Weiche Bewegung von rechts nach links (Ease-In-Out)
+                float t = (current_time - (DURATION_PAUSE_MS * 2.0f) - DURATION_MOVE_MS) / DURATION_MOVE_MS;
+                float smooth_t = t * t * (3.0f - 2.0f * t);
+                
+                offset = max_amplitude - (smooth_t * max_amplitude * 2.0f);
+            }
+            
+            // Zeichnet den Text perfekt ausbalanciert
             it.print(cx - offset, cy, font, TextAlign::CENTER, text.c_str());
         } else {
-            // Text passt → statisch zentriert anzeigen
             it.print(cx, cy, font, TextAlign::CENTER, text.c_str());
         }
       
         // Clipping beenden
         it.end_clipping();
       };
+
 
       // DIE ANZEIGE-WEICHE (Übergibt jetzt "width" statt "w2")
       if (!id(idle_message0).empty()) {
@@ -863,13 +911,24 @@ display:
 
 ######################################################################################
       
-# interval für idle page
+# interval für page messages
 interval:
-  - id: update_interval
+  - id: update_timer
     interval: 15s
     then:
+      # Phase 1: Display-Texte aktualisieren
       - script.execute: update_data
 
+      # Phase 2: Die permanent gesammelten Peaks der letzten 15s an HA senden
+      - lambda: |-
+          id(sensor_mic_left_peak).publish_state(id(mic_peak_left));
+          id(sensor_mic_right_peak).publish_state(id(mic_peak_right));
+          
+          ESP_LOGI("mic_test", "15s-Peak-Report. Left: %d | Right: %d", id(mic_peak_left), id(mic_peak_right));
+          
+          // Werte sofort nullen, um für die nächsten 15 Sekunden neu zu sammeln
+          id(mic_peak_left) = 0;
+          id(mic_peak_right) = 0;
 
 # I2S Audio Bus
 i2s_audio:
@@ -897,7 +956,40 @@ microphone:
     channel: stereo
     num_channels: 2
     i2s_mode: primary
+    on_data:
+      - lambda: |-
+          if (x.empty()) return;
 
+          size_t total_bytes = x.size();
+          int32_t max_l = 0;
+          int32_t max_r = 0;
+
+          // Ein kompletter Stereo-Frame (Links 4 Bytes + Rechts 4 Bytes) benötigt genau 8 Bytes.
+          for (size_t i = 0; i + 7 < total_bytes; i += 8) {
+            
+            // Ihr funktionierender Little-Endian-Zusammenbau für den LINKEN Kanal
+            int32_t l_val = (int32_t)((x[i + 3] << 24) | (x[i + 2] << 16) | (x[i + 1] << 8) | x[i]);
+            
+            // Ihr funktionierender Little-Endian-Zusammenbau für den RECHTEN Kanal
+            int32_t r_val = (int32_t)((x[i + 7] << 24) | (x[i + 6] << 16) | (x[i + 5] << 8) | x[i + 4]);
+
+            // Absolutwerte für die Peak-Messung
+            int32_t abs_l = std::abs(l_val);
+            int32_t abs_r = std::abs(r_val);
+
+            if (abs_l > max_l) max_l = abs_l;
+            if (abs_r > max_r) max_r = abs_r;
+          }
+
+          // Skalierung auf den 16-Bit-Bereich (>> 16) wie in Ihrem Original
+          int16_t peak_l_16 = (int16_t)(max_l >> 16);
+          int16_t peak_r_16 = (int16_t)(max_r >> 16);
+
+          // Zuweisung an Ihre aktuellen globalen Peak-Speicher
+          if (peak_l_16 > id(mic_peak_left))  id(mic_peak_left) = peak_l_16;
+          if (peak_r_16 > id(mic_peak_right)) id(mic_peak_right) = peak_r_16;
+
+          
 # Amplifier MAX 98357
 speaker:
   # A) Der physische I2S Hardware-Lautsprecher (Ausgang)
@@ -945,10 +1037,9 @@ media_player:
   - platform: speaker
     id: media_player_id
     name: Audio Player
-    buffer_size: 500000
+    buffer_size: 4000000
     icon: "mdi:speaker-message"
     task_stack_in_psram: true
-    codec_support_enabled: false
     volume_initial: 50%
     volume_increment: 5%
     volume_min: 0%
@@ -977,41 +1068,65 @@ media_player:
       speaker: media_source_speaker
       num_channels: 2
       sample_rate: 48000
-      format: MP3
+      format: 'NONE'
     announcement_pipeline:
       speaker: announcement_source_speaker
       sample_rate: 16000
       num_channels: 1
       format: FLAC
+
     on_announcement:
-      - logger.log: "Ducking enabled"
+      - logger.log:
+          level: INFO
+          format: "Ducking enabled"
       - mixer_speaker.apply_ducking:
           id: media_mixing_input
-          decibel_reduction: 20
+          decibel_reduction: 16
           duration: 0.3s
       - if:
           condition:
             lambda: 'return id(skip_next_announcement);'
           then:
-            # Skip aktiv → nur zurücksetzen
+            # Skip aktiv → nur zurücksetzen (Lokaler Klickton abgefangen)
             - lambda: 'id(skip_next_announcement) = false;'
           else:
-            # Skip NICHT aktiv → regulär ausführen
-            - script.execute: on_media_player_announcement 
+            # Skip NICHT aktiv → regulär ausführen (Echtes HA-Announcement)
+            - script.execute: on_media_player_announcement
     on_play:
-      - logger.log: "Ducking disabled"
-      - micro_wake_word.stop:
+      - logger.log:
+          level: INFO
+          format: "Micro Wake Word stopped"
+      - micro_wake_word.stop: 
+      - logger.log:
+          level: INFO
+          format: "Ducking disabled"          
       - mixer_speaker.apply_ducking:
           id: media_mixing_input
           decibel_reduction: 0
           duration: 0.3s
       - script.execute: on_media_player_play
     on_pause:
-      - micro_wake_word.start:
+      - if:
+          condition:
+            lambda: 'return !id(mww).is_running();'
+          then:
+            - logger.log:
+                level: INFO
+                format: "Micro Wake Word started (pause)"
+            - micro_wake_word.start: 
       - script.execute: on_media_player_pause
+
     on_idle:      
-      - micro_wake_word.start:
+      - if:
+          condition:
+            lambda: 'return !id(mww).is_running();'
+          then:
+            - logger.log:
+                level: INFO
+                format: "Micro Wake Word started (idle)"
+            - micro_wake_word.start: 
       - script.execute: on_media_player_idle
+        
     on_turn_on:
       - script.execute: on_media_player_turn_on
     on_turn_off:
@@ -1074,6 +1189,7 @@ voice_assistant:
         id: command_message
         value: !lambda return x;
     - logger.log: 
+        level: INFO
         format: "Command %s"
         args: [ id(command_message).c_str() ]
     - script.execute: on_voice_assistant_stt_end
@@ -1087,6 +1203,7 @@ voice_assistant:
         id: announce_message
         value: !lambda return x;    
     - logger.log: 
+        level: INFO
         format: "Announce %s"
         args: [ id(announce_message).c_str() ]
     - script.execute: on_voice_assistant_tts_start
@@ -1094,7 +1211,8 @@ voice_assistant:
     - globals.set: 
         id: url_message
         value: !lambda return x;    
-    - logger.log: 
+    - logger.log:
+        level: INFO
         format: "URL %s"
         args: [ id(url_message).c_str() ]
     - script.execute: on_voice_assistant_tts_end
@@ -1115,13 +1233,15 @@ voice_assistant:
     - globals.set: 
         id: intent_message
         value: !lambda return x;
-    - logger.log: 
+    - logger.log:
+        level: INFO
         format: "Intent %s"
         args: [ id(intent_message).c_str() ]
     - script.execute: on_voice_assistant_intent
   # on_intent_end:
     
 micro_wake_word:
+  id: mww
   task_stack_in_psram: true
   vad:
     model: https://github.com/esphome/micro-wake-word-models/raw/main/models/v2/vad.json
@@ -1295,6 +1415,7 @@ script:
       mode: int
     then:
       - logger.log:
+          level: INFO
           format: "script set_content_mode %d"
           args: [ mode ]
       - lambda: |-
@@ -1318,6 +1439,7 @@ script:
       mode: int
     then:
       - logger.log:
+          level: INFO
           format: "script set_overlay_mode %d"
           args: [ mode ]
       - lambda: |-
@@ -1346,6 +1468,7 @@ script:
     mode: restart
     then:
       - logger.log:
+          level: INFO
           format: "script show_volume_overlay"
       - lambda: |-
           id(set_overlay_mode).execute(${OVERLAY_VOLUME});
@@ -1356,7 +1479,8 @@ script:
   - id: show_error_overlay
     mode: restart
     then:
-      - logger.log:
+      - logger.log:          
+          level: INFO
           format: "script show_error_overlay"
       - lambda: |-
           id(set_overlay_mode).execute(${OVERLAY_ERROR});
@@ -1367,6 +1491,7 @@ script:
     mode: restart
     then:
       - logger.log:
+          level: INFO
           format: "script show_announce_overlay"
       - lambda: |-
           id(set_overlay_mode).execute(${OVERLAY_ANNOUNCE});
@@ -1393,18 +1518,24 @@ script:
   # sensors up
   - id: on_esp_boot_600
     then: 
-      - logger.log: "on_esp_boot_600"
+      - logger.log:
+          level: INFO
+          format: "on_esp_boot_600"
       - script.execute:
           id: set_content_mode
           mode: ${CONTENT_BOOT}
   # wifi up
   - id: on_esp_boot_250
     then: 
-      - logger.log: "on_esp_boot_250"  
+      - logger.log:
+          level: INFO
+          format: "on_esp_boot_250"  
   # network up
   - id: on_esp_boot_200
     then: 
-      - logger.log: "on_esp_boot_200"  
+      - logger.log:
+          level: INFO
+          format: "on_esp_boot_200"  
       - globals.set:
           id: skip_next_announcement
           value: "true"
@@ -1415,12 +1546,16 @@ script:
   # everthing up
   - id: on_esp_boot_minus100
     then: 
-      - logger.log: "on_esp_boot_minus100"  
+      - logger.log:
+          level: INFO
+          format: "on_esp_boot_minus100"  
       
   # Time
   - id: on_time_time_sync
     then:
-      - logger.log: "on_time_time_sync"
+      - logger.log:
+          level: INFO
+          format: "on_time_time_sync"
       - if:
           condition:
             lambda: 'return id(is_booting);'
@@ -1435,7 +1570,9 @@ script:
   # Wifi
   - id: on_wifi_connect
     then:
-      - logger.log: "on_wifi_connect"
+      - logger.log:
+          level: INFO
+          format: "on_wifi_connect"
       # - globals.set:
       #    id: skip_next_announcement
       #    value: "true"
@@ -1446,7 +1583,9 @@ script:
       - script.execute: update_data
   - id: on_wifi_disconnect
     then:
-      - logger.log: "on_wifi_disconnect"
+      - logger.log:
+          level: INFO
+          format: "on_wifi_disconnect"
       # - globals.set:
       #    id: skip_next_announcement
       #    value: "true"
@@ -1459,7 +1598,9 @@ script:
 # Api
   - id: on_api_client_connect
     then:
-      - logger.log: "on_api_client_connect"
+      - logger.log:
+          level: INFO
+          format: "on_api_client_connect"
       # - globals.set:
       #    id: skip_next_announcement
       #    value: "true"
@@ -1470,7 +1611,9 @@ script:
       - script.execute: update_data
   - id: on_api_client_disconnect
     then:
-      - logger.log: "on_api_client_disconnect"
+      - logger.log:
+          level: INFO
+          format: "on_api_client_disconnect"
       # - globals.set:
       #    id: skip_next_announcement
       #    value: "true"
@@ -1483,26 +1626,34 @@ script:
   # Media Player
   - id: on_media_player_announcement
     then:
-      - logger.log: "on_media_player_announcement"
+      - logger.log:
+          level: INFO
+          format: "on_media_player_announcement"
       - script.execute: 
           id: show_announce_overlay
   - id: on_media_player_play
     then:
-      - logger.log: "on_media_player_play"
+      - logger.log:
+          level: INFO
+          format: "on_media_player_play"
       - script.execute: 
           id: set_content_mode
           mode: ${CONTENT_PLAY}
 
   - id: on_media_player_pause
     then:
-      - logger.log: "on_media_player_pause"
+      - logger.log:
+          level: INFO
+          format: "on_media_player_pause"
       - script.execute: 
           id: set_content_mode
           mode: ${CONTENT_PAUSE}
 
   - id: on_media_player_idle
     then:
-      - logger.log: "on_media_player_idle"
+      - logger.log:
+          level: INFO
+          format: "on_media_player_idle"
       - wait_until:
           not:
             voice_assistant.is_running: 
@@ -1512,7 +1663,9 @@ script:
           
   - id: on_media_player_turn_on
     then:
-      - logger.log: "on_media_player_turn_on"
+      - logger.log:
+          level: INFO
+          format: "on_media_player_turn_on"
       # - globals.set:
       #    id: skip_next_announcement
       #    value: "true"
@@ -1524,7 +1677,9 @@ script:
 
   - id: on_media_player_turn_off
     then:
-      - logger.log: "on_media_player_turn_off"
+      - logger.log:
+          level: INFO
+          format: "on_media_player_turn_off"
       # - globals.set:
       #    id: skip_next_announcement
       #    value: "true"
@@ -1536,32 +1691,41 @@ script:
 
   - id: on_media_player_mute
     then:
-      - logger.log: "on_media_player_mute"
+      - logger.log:
+          level: INFO
+          format: "on_media_player_mute"
       - script.execute: 
           id: show_volume_overlay
 
   - id: on_media_player_unmute
     then:
-      - logger.log: "on_media_player_unmute"
+      - logger.log:
+          level: INFO
+          format: "on_media_player_unmute"
       - script.execute: 
           id: show_volume_overlay
 
   - id: on_media_player_volume
     then:
-      - logger.log: "on_media_player_volume"
+      - logger.log:
+          level: INFO
+          format: "on_media_player_volume"
       - script.execute: 
           id: show_volume_overlay
 
   - id: on_media_player_state
     then:
       - logger.log:
+          level: INFO
           format: "on_media_player_state: %s"
           args: [ 'media_player::media_player_state_to_string(id(media_player_id).state)' ]
 
 # Voice Assistant
   - id: on_voice_assistant_client_connected
     then:
-      - logger.log: "on_voice_assistant_client_connected"
+      - logger.log:
+          level: INFO
+          format: "on_voice_assistant_client_connected"
       - globals.set:
           id: skip_next_announcement
           value: "true"
@@ -1572,7 +1736,9 @@ script:
       - micro_wake_word.start:           
   - id: on_voice_assistant_client_disconnected
     then:
-      - logger.log: "on_voice_assistant_client_disconnected"
+      - logger.log:
+          level: INFO
+          format: "on_voice_assistant_client_disconnected"
       - globals.set:
           id: skip_next_announcement
           value: "true"
@@ -1582,24 +1748,34 @@ script:
           enqueue: true
   - id: on_voice_assistant_idle
     then:
-      - logger.log: "on_voice_assistant_idle"
+      - logger.log:
+          level: INFO
+          format: "on_voice_assistant_idle"
       - micro_wake_word.start:           
   - id: on_voice_assistant_start
     then:
-      - logger.log: "on_voice_assistant_start"
+      - logger.log:
+          level: INFO
+          format: "on_voice_assistant_start"
   - id: on_voice_assistant_listening
     then:
-      - logger.log: "on_voice_assistant_listening"
+      - logger.log:
+          level: INFO
+          format: "on_voice_assistant_listening"
       - script.execute: 
           id: set_content_mode
           mode: ${CONTENT_LISTEN}
           
   - id: on_voice_assistant_stt_vad_start
     then:
-      - logger.log: "on_voice_assistant_stt_vad_start"
+      - logger.log:
+          level: INFO
+          format: "on_voice_assistant_stt_vad_start"
   - id: on_voice_assistant_stt_vad_end
     then:
-      - logger.log: "on_voice_assistant_stt_vad_end"
+      - logger.log:
+          level: INFO
+          format: "on_voice_assistant_stt_vad_end"
       - script.execute: 
           id: set_content_mode
           mode: ${CONTENT_THINK}
@@ -1607,6 +1783,7 @@ script:
   - id: on_voice_assistant_stt_end
     then:
       - logger.log:
+          level: INFO
           format: "on_voice_assistant_stt_end %s"
           args: [ id(command_message).c_str() ]
       - script.execute: update_data
@@ -1615,16 +1792,21 @@ script:
   - id: on_voice_assistant_tts_start
     then:
       - logger.log:
+          level: INFO
           format: "on_voice_assistant_tts_start %s"
           args: [ id(announce_message).c_str() ]
       - script.execute: update_data
   - id: on_voice_assistant_tts_end
     then:
-      - logger.log: "on_voice_assistant_tts_end"
+      - logger.log:
+          level: INFO
+          format: "on_voice_assistant_tts_end"
 
   - id: on_voice_assistant_end
     then:
-      - logger.log: "on_voice_assistant_end"
+      - logger.log:
+          level: INFO
+          format: "on_voice_assistant_end"
       # - globals.set:
       #    id: skip_next_announcement
       #    value: "true"
@@ -1636,12 +1818,15 @@ script:
           condition:
             - micro_wake_word.is_running:                 
           then: 
-            - logger.log: "mww läuft schon"
+            - logger.log:
+                level: ERROR
+                format: "mww läuft schon"
           else:
             - micro_wake_word.start: 
   - id: on_voice_assistant_error
     then:
       - logger.log:
+          level: INFO
           format: "on_voice_assistant_error %s:%s"
           args: [ id(error_code).c_str(), id(error_message).c_str()]
       - globals.set:
@@ -1660,12 +1845,15 @@ script:
           condition:
             - micro_wake_word.is_running:
           then: 
-            - logger.log: "mww läuft schon"
+            - logger.log:
+                level: ERROR
+                format: "mww läuft schon"
           else:
             - micro_wake_word.start: 
   - id: on_voice_assistant_intent
     then:
       - logger.log:
+          level: INFO
           format: "on_voice_assistant_intent %s"
           args: [ id(intent_message).c_str() ]
                 
@@ -1675,6 +1863,7 @@ script:
       ww: string
     then: 
       - logger.log:
+          level: INFO
           format: "micro_wake_word_on_wake_word_detected %s"
           args: 
             - !lambda ww.c_str()
@@ -1692,7 +1881,9 @@ script:
   # Touchbuttons
   - id: on_btn_1_single_click
     then: 
-      - logger.log: "on_btn_1_single_click"
+      - logger.log:
+          level: INFO
+          format: "on_btn_1_single_click"
       - globals.set:
           id: skip_next_announcement
           value: "true"
@@ -1702,7 +1893,9 @@ script:
           enqueue: true
   - id: on_btn_1_double_click
     then: 
-      - logger.log: "on_btn_1_double_click"
+      - logger.log:
+          level: INFO
+          format: "on_btn_1_double_click"
       - globals.set:
           id: skip_next_announcement
           value: "true"
@@ -1712,7 +1905,9 @@ script:
           enqueue: true
   - id: on_btn_1_long_click
     then: 
-      - logger.log: "on_btn_1_long_click"
+      - logger.log:
+          level: INFO
+          format: "on_btn_1_long_click"
       - globals.set:
           id: skip_next_announcement
           value: "true"
@@ -1730,15 +1925,21 @@ script:
 
   - id: on_btn_2_single_click
     then: 
-      - logger.log: "on_btn_2_single_click"
+      - logger.log:
+          level: INFO
+          format: "on_btn_2_single_click"
       - media_player.toggle: 
         
   - id: on_btn_2_double_click
     then: 
-      - logger.log: "on_btn_2_double_click"
+      - logger.log:
+          level: INFO
+          format: "on_btn_2_double_click"
   - id: on_btn_2_long_click
     then: 
-      - logger.log: "on_btn_2_long_click"
+      - logger.log:
+          level: INFO
+          format: "on_btn_2_long_click"
       - globals.set:
           id: skip_next_announcement
           value: "true"
@@ -1748,7 +1949,9 @@ script:
           enqueue: true
   - id: on_btn_3_single_click
     then: 
-      - logger.log: "on_btn_3_single_click"
+      - logger.log:
+          level: INFO
+          format: "on_btn_3_single_click"
       - globals.set:
           id: skip_next_announcement
           value: "true"
@@ -1759,7 +1962,9 @@ script:
       - media_player.volume_down: 
   - id: on_btn_3_double_click
     then: 
-      - logger.log: "on_btn_3_double_click"
+      - logger.log:
+          level: INFO
+          format: "on_btn_3_double_click"
       - globals.set:
           id: skip_next_announcement
           value: "true"
@@ -1769,7 +1974,9 @@ script:
           enqueue: true
   - id: on_btn_3_long_click
     then: 
-      - logger.log: "on_btn_3_long_click"
+      - logger.log:
+          level: INFO
+          format: "on_btn_3_long_click"
       - globals.set:
           id: skip_next_announcement
           value: "true"
@@ -1786,7 +1993,9 @@ script:
       - script.execute: update_data
   - id: on_btn_4_single_click
     then: 
-      - logger.log: "on_btn_4_single_click"
+      - logger.log:
+          level: INFO
+          format: "on_btn_4_single_click"
       - globals.set:
           id: skip_next_announcement
           value: "true"
@@ -1797,7 +2006,9 @@ script:
       - media_player.volume_up: 
   - id: on_btn_4_double_click
     then: 
-      - logger.log: "on_btn_4_double_click"
+      - logger.log:
+          level: INFO
+          format: "on_btn_4_double_click"
       - globals.set:
           id: skip_next_announcement
           value: "true"
@@ -1807,7 +2018,9 @@ script:
           enqueue: true
   - id: on_btn_4_long_click
     then: 
-      - logger.log: "on_btn_4_long_click"
+      - logger.log:
+          level: INFO
+          format: "on_btn_4_long_click"
       - globals.set:
           id: skip_next_announcement
           value: "true"
